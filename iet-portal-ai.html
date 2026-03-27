@@ -1,0 +1,3663 @@
+<!DOCTYPE html>
+<html lang="mn">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>IET Оюутны Портал</title>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@600;700;800&family=Noto+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<!-- Firebase SDK -->
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+  import { getFirestore, doc, setDoc, getDoc, deleteDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+  /* ══════════════════════════════════════
+     🔧 FIREBASE ТОХИРГОО
+     Firebase Console → Project Settings → Your apps → SDK setup
+     Доорх утгуудыг өөрийн Firebase project-ийн утгаар солино уу
+  ══════════════════════════════════════ */
+  const firebaseConfig = {
+    apiKey:            "YOUR_API_KEY",
+    authDomain:        "YOUR_PROJECT.firebaseapp.com",
+    projectId:         "YOUR_PROJECT_ID",
+    storageBucket:     "YOUR_PROJECT.appspot.com",
+    messagingSenderId: "YOUR_SENDER_ID",
+    appId:             "YOUR_APP_ID"
+  };
+
+  /* ══════════════════════════════════════
+     🔧 EMAILJS ТОХИРГОО
+     emailjs.com → Account → API Keys → Public Key
+     Service ID: Gmail сервис нэмэх
+     Template ID: OTP template үүсгэх ({{otp_code}}, {{to_email}} хувьсагч ашиглах)
+  ══════════════════════════════════════ */
+  const EMAILJS_PUBLIC_KEY  = "YOUR_EMAILJS_PUBLIC_KEY";
+  const EMAILJS_SERVICE_ID  = "YOUR_SERVICE_ID";
+  const EMAILJS_TEMPLATE_ID = "YOUR_TEMPLATE_ID";
+
+  const app = initializeApp(firebaseConfig);
+  const db  = getFirestore(app);
+
+  /* ── OTP илгээх (Firestore хадгалах + EmailJS-р майл явуулах) ── */
+  async function sendEmailOTP(email, context) {
+    const otp = String(Math.floor(100000 + Math.random() * 900000));
+    const key = context + ':' + email.toLowerCase().replace(/[^a-z0-9]/g, '_');
+    const expiresAt = Date.now() + 3 * 60 * 1000; // 3 минут
+
+    // Firestore-д хадгалах
+    await setDoc(doc(db, 'otp_codes', key), {
+      otp,
+      email: email.toLowerCase(),
+      context,
+      expiresAt,
+      createdAt: serverTimestamp()
+    });
+
+    // EmailJS-р бодит майл явуулах
+    await emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID, {
+      to_email:    email,
+      otp_code:    otp,
+      app_name:    'IET Политехник Коллеж',
+      valid_mins:  '3',
+      context_msg: context === 'login' ? 'нэвтрэх' : 'бүртгэл баталгаажуулах'
+    }, EMAILJS_PUBLIC_KEY);
+
+    return { success: true, key };
+  }
+
+  /* ── OTP шалгах (Firestore-с унших) ── */
+  async function verifyEmailOTP(email, context, enteredCode) {
+    const key = context + ':' + email.toLowerCase().replace(/[^a-z0-9]/g, '_');
+    const snap = await getDoc(doc(db, 'otp_codes', key));
+
+    if (!snap.exists()) return { ok: false, reason: 'Код олдсонгүй. Дахин илгээнэ үү.' };
+
+    const data = snap.data();
+    if (Date.now() > data.expiresAt) {
+      await deleteDoc(doc(db, 'otp_codes', key));
+      return { ok: false, reason: '⏰ Кодын хугацаа дуусав. Дахин илгээнэ үү.' };
+    }
+    if (data.otp !== enteredCode) {
+      return { ok: false, reason: '✕ Код буруу байна. Дахин оролдоно уу.' };
+    }
+
+    // Амжилттай — кодыг устгах
+    await deleteDoc(doc(db, 'otp_codes', key));
+    return { ok: true };
+  }
+
+  // Глобал функцүүдийг window-д expose хийх
+  window._firebaseDB = db;
+  window._sendEmailOTP   = sendEmailOTP;
+  window._verifyEmailOTP = verifyEmailOTP;
+  window._firebaseReady  = true;
+  document.dispatchEvent(new Event('firebase-ready'));
+</script>
+<!-- EmailJS SDK -->
+<script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
+<style>
+:root {
+  --navy: #0b1832;
+  --blue: #1a4a8a;
+  --blue2: #1e5bbf;
+  --cyan: #00c8ff;
+  --cyan2: #00eaff;
+  --accent: #f5a623;
+  --green: #00e5a0;
+  --red: #ff4d6d;
+  --purple: #9b5de5;
+  --bg: #060d1f;
+  --bg2: #0d1b38;
+  --card: rgba(15,30,70,0.85);
+  --border: rgba(0,200,255,0.18);
+  --text: #e8f0ff;
+  --muted: #7a9abf;
+  --white: #ffffff;
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+html { scroll-behavior: smooth; }
+
+body {
+  font-family: 'Noto Sans', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* ── PARTICLE BG ── */
+#particles {
+  position: fixed; top:0; left:0; width:100%; height:100%;
+  pointer-events: none; z-index: 0; overflow: hidden;
+}
+.particle {
+  position: absolute;
+  border-radius: 50%;
+  background: var(--cyan);
+  opacity: 0;
+  animation: float linear infinite;
+}
+@keyframes float {
+  0%   { transform: translateY(100vh) scale(0); opacity: 0; }
+  10%  { opacity: 0.4; }
+  90%  { opacity: 0.2; }
+  100% { transform: translateY(-20px) scale(1); opacity: 0; }
+}
+
+/* ── SCANLINES ── */
+body::before {
+  content:'';
+  position: fixed; top:0; left:0; width:100%; height:100%;
+  background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,200,255,0.015) 2px, rgba(0,200,255,0.015) 4px);
+  pointer-events: none; z-index: 1;
+}
+
+/* ═══════════════ LOGIN ═══════════════ */
+#loginPage {
+  position: relative; z-index: 10;
+  min-height: 100vh;
+  display: flex; align-items: center; justify-content: center;
+  padding: 20px;
+}
+
+.login-wrap {
+  width: 100%; max-width: 460px;
+}
+
+.login-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 24px;
+  padding: 48px 40px;
+  backdrop-filter: blur(20px);
+  box-shadow: 0 0 60px rgba(0,200,255,0.08), 0 30px 80px rgba(0,0,0,0.5);
+  animation: slideUp .6s cubic-bezier(.16,1,.3,1);
+  position: relative;
+  overflow: hidden;
+}
+
+.login-card::before {
+  content:'';
+  position: absolute; top:-1px; left:20%; right:20%; height:2px;
+  background: linear-gradient(90deg, transparent, var(--cyan), transparent);
+  border-radius: 2px;
+}
+
+@keyframes slideUp {
+  from { opacity:0; transform: translateY(40px); }
+  to   { opacity:1; transform: translateY(0); }
+}
+
+.login-logo { text-align: center; margin-bottom: 36px; }
+
+.logo-hexagon {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 80px; height: 80px;
+  background: linear-gradient(135deg, var(--blue2), var(--navy));
+  border: 2px solid var(--cyan);
+  border-radius: 18px;
+  margin-bottom: 16px;
+  box-shadow: 0 0 30px rgba(0,200,255,0.3);
+  position: relative;
+}
+
+.logo-hexagon::after {
+  content:'';
+  position: absolute; inset:-4px;
+  border-radius: 22px;
+  border: 1px solid rgba(0,200,255,0.2);
+}
+
+.logo-hexagon span {
+  font-family: 'Orbitron', sans-serif;
+  font-weight: 800; font-size: 26px;
+  color: var(--cyan);
+  letter-spacing: 2px;
+  text-shadow: 0 0 20px var(--cyan);
+}
+
+.login-logo h2 {
+  font-family: 'Orbitron', sans-serif;
+  font-weight: 600; font-size: 13px;
+  color: var(--cyan); letter-spacing: 1px;
+  text-transform: uppercase; line-height: 1.6;
+}
+
+.login-logo p { font-size: 12px; color: var(--muted); margin-top: 4px; }
+
+.login-title {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 18px; font-weight: 700;
+  color: var(--white); margin-bottom: 6px;
+  text-align: center;
+}
+.login-sub { text-align: center; color: var(--muted); font-size: 13px; margin-bottom: 30px; }
+
+.fgroup { margin-bottom: 20px; }
+
+.fgroup label {
+  display: block; font-size: 12px; font-weight: 600;
+  color: var(--cyan); letter-spacing: 1px;
+  text-transform: uppercase; margin-bottom: 8px;
+}
+
+.fgroup input {
+  width: 100%; padding: 13px 18px;
+  background: rgba(0,200,255,0.05);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--text); font-size: 14px;
+  font-family: 'Noto Sans', sans-serif;
+  outline: none;
+  transition: border-color .2s, box-shadow .2s;
+}
+.fgroup input:focus {
+  border-color: var(--cyan);
+  box-shadow: 0 0 16px rgba(0,200,255,0.2);
+}
+.fgroup input::placeholder { color: var(--muted); }
+
+.btn-login {
+  width: 100%; padding: 15px;
+  background: linear-gradient(135deg, var(--blue2), var(--cyan));
+  color: var(--navy); border: none; border-radius: 12px;
+  font-family: 'Orbitron', sans-serif;
+  font-weight: 700; font-size: 14px;
+  letter-spacing: 2px; text-transform: uppercase;
+  cursor: pointer; margin-top: 6px;
+  transition: all .25s;
+  box-shadow: 0 4px 24px rgba(0,200,255,0.3);
+}
+.btn-login:hover {
+  box-shadow: 0 6px 32px rgba(0,200,255,0.5);
+  transform: translateY(-2px);
+}
+.btn-login:active { transform: translateY(0); }
+
+.error-msg {
+  background: rgba(255,77,109,0.12);
+  border: 1px solid rgba(255,77,109,0.4);
+  color: var(--red);
+  padding: 10px 14px; border-radius: 8px;
+  font-size: 13px; margin-bottom: 16px;
+  display: none; text-align: center;
+}
+
+.demo-accounts {
+  margin-top: 28px; padding-top: 20px;
+  border-top: 1px solid var(--border);
+}
+.demo-accounts p { color: var(--muted); font-size: 11px; text-align: center; margin-bottom: 12px; text-transform: uppercase; letter-spacing: 1px; }
+
+.demo-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+
+.demo-btn {
+  background: rgba(0,200,255,0.06);
+  border: 1px solid var(--border);
+  border-radius: 8px; padding: 8px 10px;
+  cursor: pointer; transition: all .2s;
+  text-align: left;
+}
+.demo-btn:hover { background: rgba(0,200,255,0.12); border-color: var(--cyan); }
+.demo-btn .dn { font-size: 12px; font-weight: 600; color: var(--text); }
+.demo-btn .did { font-size: 11px; color: var(--muted); margin-top: 2px; }
+
+/* ═══════════════ DASHBOARD ═══════════════ */
+#dashboard { display: none; position: relative; z-index: 10; }
+
+/* TOPBAR */
+.topbar {
+  position: sticky; top: 0; z-index: 100;
+  background: rgba(6,13,31,0.92);
+  backdrop-filter: blur(20px);
+  border-bottom: 1px solid var(--border);
+  padding: 0 28px;
+  height: 62px;
+  display: flex; align-items: center; justify-content: space-between;
+}
+
+.tb-left { display: flex; align-items: center; gap: 14px; }
+
+.tb-logo {
+  width: 38px; height: 38px;
+  background: linear-gradient(135deg, var(--blue2), var(--navy));
+  border: 1px solid var(--cyan);
+  border-radius: 10px;
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 0 12px rgba(0,200,255,0.25);
+}
+.tb-logo span {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 12px; font-weight: 800;
+  color: var(--cyan);
+}
+
+.tb-title {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 13px; font-weight: 700;
+  color: var(--text); letter-spacing: .5px;
+}
+.tb-sub { font-size: 11px; color: var(--muted); margin-top: 1px; }
+
+.tb-right { display: flex; align-items: center; gap: 12px; }
+
+.user-chip {
+  display: flex; align-items: center; gap: 10px;
+  background: rgba(0,200,255,0.07);
+  border: 1px solid var(--border);
+  border-radius: 24px; padding: 6px 14px 6px 6px;
+}
+.user-av {
+  width: 30px; height: 30px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-family: 'Orbitron', sans-serif;
+  font-size: 12px; font-weight: 700;
+  color: var(--navy);
+  flex-shrink: 0;
+}
+.user-chip .uname { font-size: 13px; font-weight: 600; color: var(--text); }
+
+.btn-out {
+  background: rgba(255,77,109,0.12);
+  border: 1px solid rgba(255,77,109,0.3);
+  color: var(--red); padding: 7px 16px;
+  border-radius: 20px; font-size: 12px;
+  font-family: 'Noto Sans', sans-serif;
+  font-weight: 600; cursor: pointer;
+  transition: all .2s; letter-spacing: .5px;
+}
+.btn-out:hover { background: rgba(255,77,109,0.22); }
+
+/* MAIN */
+.main { max-width: 1200px; margin: 0 auto; padding: 28px 24px; }
+
+/* HERO BANNER */
+.hero-banner {
+  background: linear-gradient(120deg, rgba(26,74,138,0.6) 0%, rgba(11,24,50,0.9) 60%, rgba(0,200,255,0.08) 100%);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 28px 32px;
+  display: flex; align-items: center; gap: 24px;
+  margin-bottom: 24px;
+  position: relative; overflow: hidden;
+  animation: fadeIn .4s ease;
+}
+.hero-banner::after {
+  content:'';
+  position: absolute; right:-40px; top:-40px;
+  width: 200px; height: 200px;
+  background: radial-gradient(circle, rgba(0,200,255,0.08), transparent 70%);
+  border-radius: 50%;
+}
+
+.hero-av {
+  width: 70px; height: 70px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-family: 'Orbitron', sans-serif; font-size: 26px; font-weight: 800;
+  color: var(--navy); flex-shrink: 0;
+  box-shadow: 0 0 20px rgba(0,200,255,0.3);
+  border: 2px solid rgba(255,255,255,0.2);
+}
+
+.hero-info h2 {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 20px; font-weight: 700;
+  color: var(--white); margin-bottom: 4px;
+}
+.hero-info .hid { color: var(--cyan); font-size: 13px; margin-bottom: 6px; }
+.hero-info .hdept { color: var(--muted); font-size: 13px; }
+
+.hero-tags { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+.htag {
+  padding: 4px 12px; border-radius: 20px;
+  font-size: 11px; font-weight: 600; letter-spacing: .5px;
+  border: 1px solid;
+}
+
+/* STATS */
+.stats-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 14px; margin-bottom: 24px;
+}
+
+.stat-c {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px; padding: 18px 20px;
+  position: relative; overflow: hidden;
+  animation: fadeIn .4s ease both;
+}
+.stat-c::before {
+  content:'';
+  position: absolute; top:0; left:0; right:0; height:2px;
+}
+.stat-c:nth-child(1)::before { background: linear-gradient(90deg, var(--cyan), transparent); }
+.stat-c:nth-child(2)::before { background: linear-gradient(90deg, var(--green), transparent); }
+.stat-c:nth-child(3)::before { background: linear-gradient(90deg, var(--accent), transparent); }
+.stat-c:nth-child(4)::before { background: linear-gradient(90deg, var(--purple), transparent); }
+
+.stat-c:nth-child(2) { animation-delay:.08s }
+.stat-c:nth-child(3) { animation-delay:.16s }
+.stat-c:nth-child(4) { animation-delay:.24s }
+
+.stat-icon { font-size: 22px; margin-bottom: 8px; }
+.stat-v {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 26px; font-weight: 800;
+  color: var(--white); line-height: 1;
+}
+.stat-l { font-size: 12px; color: var(--muted); margin-top: 4px; }
+
+@keyframes fadeIn {
+  from { opacity:0; transform: translateY(12px); }
+  to   { opacity:1; transform: translateY(0); }
+}
+
+/* TABS */
+.tab-bar {
+  display: flex; gap: 4px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px; padding: 6px;
+  margin-bottom: 24px;
+  overflow-x: auto;
+}
+
+.tab-btn {
+  padding: 9px 20px; border: none; background: none;
+  border-radius: 10px; cursor: pointer;
+  font-family: 'Noto Sans', sans-serif;
+  font-size: 13px; font-weight: 600;
+  color: var(--muted); white-space: nowrap;
+  transition: all .2s;
+}
+.tab-btn:hover { color: var(--text); background: rgba(0,200,255,0.06); }
+.tab-btn.active {
+  background: linear-gradient(135deg, var(--blue2), rgba(0,200,255,0.3));
+  color: var(--white);
+  box-shadow: 0 2px 12px rgba(0,200,255,0.2);
+}
+
+.tab-pane { display: none; animation: fadeIn .3s ease; }
+.tab-pane.active { display: block; }
+
+/* SEMESTER SELECT */
+.sem-row {
+  display: flex; align-items: center; gap: 12px; margin-bottom: 18px; flex-wrap: wrap;
+}
+.sem-row label { font-size: 13px; font-weight: 600; color: var(--cyan); letter-spacing: .5px; }
+.sem-row select {
+  background: var(--card); border: 1px solid var(--border);
+  color: var(--text); padding: 9px 16px; border-radius: 10px;
+  font-family: 'Noto Sans', sans-serif; font-size: 13px;
+  outline: none; cursor: pointer; appearance: none;
+  padding-right: 30px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%2300c8ff' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+}
+
+/* GRADES TABLE */
+.gtable-wrap {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 16px; overflow: hidden;
+}
+table { width: 100%; border-collapse: collapse; }
+thead tr {
+  background: rgba(0,200,255,0.07);
+  border-bottom: 1px solid var(--border);
+}
+th {
+  padding: 14px 16px; text-align: left;
+  font-size: 11px; font-weight: 700;
+  color: var(--cyan); text-transform: uppercase; letter-spacing: 1px;
+}
+td { padding: 13px 16px; font-size: 13px; border-bottom: 1px solid rgba(255,255,255,0.04); }
+tr:last-child td { border-bottom: none; }
+tr:hover td { background: rgba(0,200,255,0.04); }
+
+.g-icon { margin-right: 8px; }
+
+.gbadge {
+  display: inline-block; padding: 4px 12px; border-radius: 20px;
+  font-weight: 700; font-size: 12px; font-family: 'Orbitron', sans-serif;
+}
+.ga { background: rgba(0,229,160,0.15); color: var(--green); border: 1px solid rgba(0,229,160,0.3); }
+.gb { background: rgba(0,200,255,0.12); color: var(--cyan); border: 1px solid rgba(0,200,255,0.25); }
+.gc { background: rgba(245,166,35,0.12); color: var(--accent); border: 1px solid rgba(245,166,35,0.3); }
+.gd { background: rgba(255,77,109,0.12); color: var(--red); border: 1px solid rgba(255,77,109,0.25); }
+.gf { background: rgba(255,77,109,0.2);  color: #9b1a1a; border: 1px solid rgba(255,77,109,0.4); }
+
+.gpa-val { font-family: 'Orbitron', sans-serif; font-size: 13px; font-weight: 700; }
+
+.dept-chip {
+  display: inline-block; padding: 3px 10px; border-radius: 12px;
+  font-size: 11px; font-weight: 600;
+  background: rgba(155,93,229,0.15); color: var(--purple);
+  border: 1px solid rgba(155,93,229,0.25);
+}
+
+/* SCHEDULE */
+.sched-grid {
+  display: grid; grid-template-columns: repeat(5,1fr); gap: 12px;
+}
+.sched-day {
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 14px; overflow: hidden;
+}
+.sday-head {
+  background: linear-gradient(135deg, var(--blue2), rgba(0,200,255,0.2));
+  padding: 12px; text-align: center;
+  font-family: 'Orbitron', sans-serif;
+  font-size: 12px; font-weight: 700; color: var(--white);
+  letter-spacing: 1px;
+}
+.sclass {
+  padding: 12px; border-bottom: 1px solid rgba(255,255,255,0.04);
+  transition: background .15s;
+}
+.sclass:last-child { border-bottom: none; }
+.sclass:hover { background: rgba(0,200,255,0.05); }
+.sc-time { font-size: 10px; color: var(--cyan); font-weight: 700; margin-bottom: 3px; }
+.sc-name { font-size: 12px; color: var(--text); font-weight: 500; line-height: 1.3; margin-bottom: 3px; }
+.sc-room { font-size: 10px; color: var(--muted); }
+
+/* PROFILE */
+.profile-card {
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 16px; padding: 28px;
+  max-width: 700px;
+}
+.profile-row {
+  display: flex; align-items: center;
+  padding: 13px 0; border-bottom: 1px solid rgba(255,255,255,0.05);
+}
+.profile-row:last-child { border-bottom: none; }
+.pr-label { width: 200px; font-size: 12px; color: var(--cyan); font-weight: 600; letter-spacing: .5px; text-transform: uppercase; }
+.pr-val { font-size: 14px; color: var(--text); font-weight: 500; }
+
+/* GPA Summary */
+.gpa-summary {
+  display: flex; gap: 14px; margin-top: 18px; flex-wrap: wrap;
+}
+.gpa-item {
+  flex: 1; min-width: 120px;
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 12px; padding: 14px 16px; text-align: center;
+}
+.gpa-item .gv {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 22px; font-weight: 800;
+  color: var(--cyan); margin-bottom: 4px;
+}
+.gpa-item .gl { font-size: 11px; color: var(--muted); }
+
+@media (max-width: 900px) {
+  .stats-row { grid-template-columns: 1fr 1fr; }
+  .sched-grid { grid-template-columns: 1fr; }
+  .topbar { padding: 0 14px; }
+  .tb-title { display: none; }
+}
+
+/* ══════════════ AUTH MODAL OVERLAY ══════════════ */
+.auth-overlay {
+  position: fixed; inset:0; z-index: 9999;
+  background: rgba(4,9,22,0.92);
+  backdrop-filter: blur(10px);
+  display: flex; align-items: center; justify-content: center;
+  padding: 20px;
+  animation: fadeOverlay .3s ease;
+}
+.auth-overlay.hidden { display: none; }
+
+@keyframes fadeOverlay {
+  from { opacity:0; } to { opacity:1; }
+}
+
+.auth-modal {
+  width: 100%; max-width: 480px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 24px;
+  overflow: hidden;
+  box-shadow: 0 0 80px rgba(0,200,255,0.1), 0 40px 100px rgba(0,0,0,0.6);
+  animation: slideUp .5s cubic-bezier(.16,1,.3,1);
+  position: relative;
+}
+
+.auth-modal::before {
+  content:'';
+  position: absolute; top:-1px; left:15%; right:15%; height:2px;
+  background: linear-gradient(90deg, transparent, var(--cyan), transparent);
+}
+
+.auth-header {
+  padding: 28px 32px 20px;
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 14px;
+}
+.auth-header-icon {
+  width: 44px; height: 44px; border-radius: 12px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 20px; flex-shrink: 0;
+}
+.auth-header h3 {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 15px; font-weight: 700;
+  color: var(--white); margin-bottom: 3px;
+}
+.auth-header p { font-size: 12px; color: var(--muted); }
+
+.auth-close {
+  margin-left: auto; background: none; border: none;
+  color: var(--muted); font-size: 20px; cursor: pointer;
+  padding: 4px 8px; border-radius: 8px;
+  transition: all .2s;
+}
+.auth-close:hover { color: var(--red); background: rgba(255,77,109,0.1); }
+
+.auth-body { padding: 24px 32px 28px; }
+
+/* Auth Tabs */
+.auth-tabs {
+  display: flex; gap: 4px;
+  background: rgba(0,200,255,0.05);
+  border: 1px solid var(--border);
+  border-radius: 10px; padding: 4px;
+  margin-bottom: 22px;
+}
+.auth-tab {
+  flex: 1; padding: 8px; border: none; background: none;
+  border-radius: 8px; cursor: pointer;
+  font-size: 12px; font-weight: 600; color: var(--muted);
+  font-family: 'Noto Sans', sans-serif;
+  transition: all .2s;
+}
+.auth-tab.active {
+  background: linear-gradient(135deg, var(--blue2), rgba(0,200,255,0.25));
+  color: var(--white);
+  box-shadow: 0 2px 10px rgba(0,200,255,0.2);
+}
+
+.auth-section { display: none; }
+.auth-section.active { display: block; }
+
+/* Login with existing account section */
+.login-divider {
+  display: flex; align-items: center; gap: 12px;
+  margin: 18px 0;
+}
+.login-divider::before, .login-divider::after {
+  content:''; flex:1; height:1px; background: var(--border);
+}
+.login-divider span { font-size: 11px; color: var(--muted); white-space: nowrap; }
+
+/* ── SOCIAL LOGIN BUTTONS ── */
+.social-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 6px; }
+.social-grid.single { grid-template-columns: 1fr; }
+
+.social-btn {
+  display: flex; align-items: center; gap: 10px;
+  padding: 11px 14px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--border);
+  border-radius: 10px; cursor: pointer;
+  transition: all .25s; width: 100%;
+  font-family: 'Noto Sans', sans-serif;
+}
+.social-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(0,0,0,0.3);
+}
+
+.social-btn .sb-icon {
+  width: 28px; height: 28px; border-radius: 7px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 16px; flex-shrink: 0;
+}
+
+.social-btn .sb-text { text-align: left; }
+.social-btn .sb-label { font-size: 11px; font-weight: 700; color: var(--text); display: block; }
+.social-btn .sb-sub { font-size: 10px; color: var(--muted); display: block; }
+
+/* Google */
+.sb-google { border-color: rgba(234,67,53,0.3); }
+.sb-google:hover { border-color: #ea4335; background: rgba(234,67,53,0.08); }
+.sb-google .sb-icon { background: rgba(234,67,53,0.15); }
+
+/* QPay */
+.sb-qpay { border-color: rgba(0,150,255,0.3); }
+.sb-qpay:hover { border-color: #0096ff; background: rgba(0,150,255,0.08); }
+.sb-qpay .sb-icon { background: rgba(0,150,255,0.15); }
+
+/* Khan Bank */
+.sb-khan { border-color: rgba(0,180,120,0.3); }
+.sb-khan:hover { border-color: #00b478; background: rgba(0,180,120,0.08); }
+.sb-khan .sb-icon { background: rgba(0,180,120,0.15); }
+
+/* State Bank */
+.sb-state { border-color: rgba(30,91,191,0.3); }
+.sb-state:hover { border-color: #1e5bbf; background: rgba(30,91,191,0.1); }
+.sb-state .sb-icon { background: rgba(30,91,191,0.2); }
+
+/* Golomt */
+.sb-golomt { border-color: rgba(220,53,69,0.3); }
+.sb-golomt:hover { border-color: #dc3545; background: rgba(220,53,69,0.08); }
+.sb-golomt .sb-icon { background: rgba(220,53,69,0.15); }
+
+/* TDB */
+.sb-tdb { border-color: rgba(255,140,0,0.3); }
+.sb-tdb:hover { border-color: #ff8c00; background: rgba(255,140,0,0.08); }
+.sb-tdb .sb-icon { background: rgba(255,140,0,0.15); }
+
+/* ── FORM FIELDS ── */
+.af-group { margin-bottom: 16px; }
+.af-group label {
+  display: block; font-size: 11px; font-weight: 700;
+  color: var(--cyan); text-transform: uppercase;
+  letter-spacing: .8px; margin-bottom: 7px;
+}
+.af-group input, .af-group select {
+  width: 100%; padding: 12px 16px;
+  background: rgba(0,200,255,0.04);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--text); font-size: 13px;
+  font-family: 'Noto Sans', sans-serif;
+  outline: none; transition: border-color .2s, box-shadow .2s;
+}
+.af-group input:focus, .af-group select:focus {
+  border-color: var(--cyan);
+  box-shadow: 0 0 14px rgba(0,200,255,0.15);
+}
+.af-group input::placeholder { color: var(--muted); }
+.af-group select { cursor: pointer; appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%2300c8ff' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 14px center;
+  background-size: 12px;
+}
+
+.af-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+
+/* ── OTP BOX ── */
+.otp-box {
+  background: rgba(0,200,255,0.05);
+  border: 1px solid rgba(0,200,255,0.2);
+  border-radius: 14px; padding: 18px;
+  margin: 16px 0; text-align: center;
+  display: none;
+}
+.otp-box.visible { display: block; animation: fadeIn .3s ease; }
+
+.otp-title { font-size: 12px; font-weight: 700; color: var(--cyan); margin-bottom: 4px; letter-spacing: .5px; }
+.otp-desc { font-size: 11px; color: var(--muted); margin-bottom: 14px; line-height: 1.5; }
+
+.otp-inputs { display: flex; gap: 8px; justify-content: center; margin-bottom: 12px; }
+.otp-digit {
+  width: 44px; height: 52px;
+  background: rgba(0,0,0,0.3);
+  border: 2px solid var(--border);
+  border-radius: 10px;
+  text-align: center; font-size: 20px; font-weight: 800;
+  font-family: 'Orbitron', sans-serif;
+  color: var(--cyan); outline: none;
+  transition: border-color .2s, box-shadow .2s;
+  caret-color: var(--cyan);
+}
+.otp-digit:focus {
+  border-color: var(--cyan);
+  box-shadow: 0 0 14px rgba(0,200,255,0.25);
+}
+
+.otp-resend { font-size: 11px; color: var(--muted); }
+.otp-resend a { color: var(--cyan); text-decoration: none; cursor: pointer; }
+.otp-resend a:hover { text-decoration: underline; }
+
+.otp-timer { font-size: 12px; color: var(--accent); font-weight: 700; }
+
+/* ── BUTTONS ── */
+.btn-auth {
+  width: 100%; padding: 14px;
+  background: linear-gradient(135deg, var(--blue2), var(--cyan));
+  color: var(--navy); border: none; border-radius: 12px;
+  font-family: 'Orbitron', sans-serif;
+  font-weight: 800; font-size: 13px;
+  letter-spacing: 1.5px; text-transform: uppercase;
+  cursor: pointer; transition: all .25s;
+  box-shadow: 0 4px 20px rgba(0,200,255,0.3);
+  margin-top: 4px;
+}
+.btn-auth:hover {
+  box-shadow: 0 6px 28px rgba(0,200,255,0.45);
+  transform: translateY(-2px);
+}
+.btn-auth:active { transform: translateY(0); }
+.btn-auth:disabled { opacity:.5; cursor:not-allowed; transform:none; }
+
+.btn-auth-sec {
+  width: 100%; padding: 12px;
+  background: rgba(0,200,255,0.07);
+  border: 1px solid var(--border);
+  color: var(--cyan); border-radius: 12px;
+  font-family: 'Noto Sans', sans-serif;
+  font-weight: 700; font-size: 13px;
+  cursor: pointer; transition: all .2s;
+  margin-top: 8px;
+}
+.btn-auth-sec:hover { background: rgba(0,200,255,0.13); }
+
+/* ── QPAY QR MODAL ── */
+.qpay-modal {
+  text-align: center; padding: 10px 0;
+}
+.qpay-qr {
+  width: 180px; height: 180px;
+  background: white; border-radius: 16px;
+  margin: 0 auto 16px;
+  display: flex; align-items: center; justify-content: center;
+  padding: 12px;
+  box-shadow: 0 0 30px rgba(0,150,255,0.2);
+  position: relative; overflow: hidden;
+}
+.qpay-qr canvas { width: 100% !important; height: 100% !important; }
+.qpay-apps { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin: 14px 0; }
+.qpay-app {
+  padding: 6px 14px; border-radius: 20px;
+  font-size: 11px; font-weight: 700;
+  border: 1px solid; cursor: pointer;
+  transition: all .2s;
+}
+.qpay-desc { font-size: 12px; color: var(--muted); line-height: 1.5; }
+.qpay-amount {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 24px; font-weight: 800;
+  color: var(--cyan); margin-bottom: 4px;
+}
+.qpay-amount-label { font-size: 11px; color: var(--muted); margin-bottom: 16px; }
+
+/* ── BANK REDIRECT ── */
+.bank-redirect {
+  text-align: center; padding: 8px 0;
+}
+.bank-logo-big {
+  width: 80px; height: 80px; border-radius: 20px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 36px; margin: 0 auto 14px;
+  border: 2px solid var(--border);
+}
+.bank-redirect h4 {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 14px; color: var(--white); margin-bottom: 6px;
+}
+.bank-redirect p { font-size: 12px; color: var(--muted); line-height: 1.6; margin-bottom: 18px; }
+
+.bank-input-phone { position: relative; }
+.bank-phone-prefix {
+  position: absolute; left:14px; top:50%; transform: translateY(-50%);
+  font-size: 13px; color: var(--cyan); font-weight: 700;
+  pointer-events: none;
+}
+.bank-phone-prefix + input { padding-left: 54px !important; }
+
+/* ── STATUS MESSAGES ── */
+.auth-msg {
+  padding: 10px 14px; border-radius: 8px;
+  font-size: 12px; margin-bottom: 14px;
+  display: none; text-align: center;
+}
+.auth-msg.error { background: rgba(255,77,109,0.1); border:1px solid rgba(255,77,109,0.3); color:var(--red); display:block; }
+.auth-msg.success { background: rgba(0,229,160,0.1); border:1px solid rgba(0,229,160,0.3); color:var(--green); display:block; }
+.auth-msg.info { background: rgba(0,200,255,0.08); border:1px solid rgba(0,200,255,0.2); color:var(--cyan); display:block; }
+
+/* ── STEP INDICATOR ── */
+.auth-steps {
+  display: flex; align-items: center; justify-content: center;
+  gap: 0; margin-bottom: 20px;
+}
+.auth-step {
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+}
+.step-dot {
+  width: 28px; height: 28px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 800;
+  border: 2px solid var(--border);
+  color: var(--muted);
+  transition: all .3s;
+}
+.step-dot.done { background: var(--cyan); border-color: var(--cyan); color: var(--navy); }
+.step-dot.active { border-color: var(--cyan); color: var(--cyan); box-shadow: 0 0 12px rgba(0,200,255,0.3); }
+.step-line { width: 40px; height: 2px; background: var(--border); margin: 0 4px; margin-bottom: 14px; }
+.step-line.done { background: var(--cyan); }
+.step-label { font-size: 9px; color: var(--muted); font-weight: 600; letter-spacing: .5px; text-align: center; }
+.auth-step .step-label.active { color: var(--cyan); }
+
+/* ── REGISTER CONFIRM ── */
+.reg-confirm {
+  background: rgba(0,200,255,0.04);
+  border: 1px solid rgba(0,200,255,0.15);
+  border-radius: 12px; padding: 16px;
+  margin-bottom: 16px;
+}
+.reg-confirm-row {
+  display: flex; justify-content: space-between;
+  padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,0.04);
+  font-size: 12px;
+}
+.reg-confirm-row:last-child { border-bottom: none; }
+.reg-confirm-row span:first-child { color: var(--muted); }
+.reg-confirm-row span:last-child { color: var(--text); font-weight: 600; }
+
+/* ── LINK BUTTON on LOGIN page ── */
+.auth-link-btn {
+  background: none; border: none;
+  color: var(--cyan); font-size: 13px;
+  cursor: pointer; text-decoration: underline;
+  font-family: 'Noto Sans', sans-serif;
+  padding: 0; transition: color .2s;
+}
+.auth-link-btn:hover { color: var(--cyan2); }
+
+.login-auth-row {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-top: 16px; padding-top: 16px;
+  border-top: 1px solid var(--border);
+  font-size: 12px; color: var(--muted);
+}
+
+/* ── PAYMENT TAB in dashboard ── */
+.payment-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 16px; padding: 24px;
+  margin-bottom: 16px;
+}
+.payment-card h4 {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 13px; font-weight: 700;
+  color: var(--cyan); margin-bottom: 16px;
+  display: flex; align-items: center; gap: 8px;
+}
+.tuition-info {
+  display: grid; grid-template-columns: repeat(3,1fr); gap: 12px;
+  margin-bottom: 20px;
+}
+.tuition-item {
+  background: rgba(0,0,0,0.2);
+  border: 1px solid var(--border);
+  border-radius: 10px; padding: 14px;
+  text-align: center;
+}
+.tuition-item .tv {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 16px; font-weight: 800;
+  color: var(--white); margin-bottom: 4px;
+}
+.tuition-item .tl { font-size: 10px; color: var(--muted); }
+.pay-methods { display: grid; grid-template-columns: repeat(3,1fr); gap: 10px; }
+.pay-method-btn {
+  padding: 12px 8px;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--border);
+  border-radius: 10px; cursor: pointer;
+  text-align: center; transition: all .25s;
+  font-family: 'Noto Sans', sans-serif;
+}
+.pay-method-btn:hover { transform: translateY(-2px); }
+.pay-method-btn .pm-icon { font-size: 22px; margin-bottom: 6px; }
+.pay-method-btn .pm-name { font-size: 11px; font-weight: 700; color: var(--text); }
+.pay-method-btn .pm-sub { font-size: 9px; color: var(--muted); margin-top: 2px; }
+
+.pay-history { margin-top: 8px; }
+.pay-hist-row {
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px 0; border-bottom: 1px solid rgba(255,255,255,0.04);
+}
+.pay-hist-row:last-child { border-bottom: none; }
+.ph-icon { width: 36px; height: 36px; border-radius: 10px;
+  display: flex; align-items: center; justify-content: center; font-size: 16px; flex-shrink:0; }
+.ph-info { flex: 1; }
+.ph-name { font-size: 13px; font-weight: 600; color: var(--text); }
+.ph-date { font-size: 11px; color: var(--muted); }
+.ph-amount { font-family: 'Orbitron', sans-serif; font-size: 13px; font-weight: 800; }
+
+/* ── GMAIL SYNC INDICATOR ── */
+.gmail-badge {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 10px; border-radius: 20px;
+  font-size: 11px; font-weight: 700;
+  background: rgba(234,67,53,0.12);
+  border: 1px solid rgba(234,67,53,0.3);
+  color: #ea4335;
+  cursor: pointer;
+  transition: all .2s;
+}
+.gmail-badge:hover { background: rgba(234,67,53,0.2); }
+.gmail-badge .dot { width:7px; height:7px; border-radius:50%; }
+.gmail-badge .dot.connected { background: var(--green); }
+.gmail-badge .dot.disconnected { background: var(--red); }
+
+/* ══════════════ AI ASSISTANT ══════════════ */
+#aiBtn {
+  position: fixed; bottom: 28px; right: 28px; z-index: 9000;
+  width: 58px; height: 58px; border-radius: 50%;
+  background: linear-gradient(135deg, #1e5bbf, #00c8ff);
+  border: none; cursor: pointer;
+  box-shadow: 0 4px 24px rgba(0,200,255,0.45), 0 0 0 0 rgba(0,200,255,0.3);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 24px; transition: all .3s;
+  animation: aiBtnPulse 2.5s infinite;
+}
+#aiBtn:hover { transform: scale(1.1); box-shadow: 0 6px 32px rgba(0,200,255,0.6); }
+@keyframes aiBtnPulse {
+  0%,100% { box-shadow: 0 4px 24px rgba(0,200,255,0.4), 0 0 0 0 rgba(0,200,255,0.3); }
+  50% { box-shadow: 0 4px 24px rgba(0,200,255,0.5), 0 0 0 10px rgba(0,200,255,0); }
+}
+#aiPanel {
+  position: fixed; bottom: 100px; right: 24px; z-index: 9001;
+  width: 370px; max-height: 520px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  box-shadow: 0 0 60px rgba(0,200,255,0.12), 0 30px 80px rgba(0,0,0,0.5);
+  display: flex; flex-direction: column;
+  overflow: hidden;
+  backdrop-filter: blur(20px);
+  transition: all .35s cubic-bezier(.16,1,.3,1);
+  transform-origin: bottom right;
+}
+#aiPanel.hidden {
+  opacity: 0; transform: scale(0.85) translateY(20px); pointer-events: none;
+}
+.ai-header {
+  padding: 16px 20px;
+  background: linear-gradient(135deg, rgba(30,91,191,0.5), rgba(0,200,255,0.1));
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 12px;
+}
+.ai-avatar {
+  width: 36px; height: 36px; border-radius: 50%;
+  background: linear-gradient(135deg, #1e5bbf, #00c8ff);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 18px; flex-shrink: 0;
+  box-shadow: 0 0 14px rgba(0,200,255,0.4);
+}
+.ai-header-info h4 {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 12px; font-weight: 700; color: var(--white);
+  letter-spacing: .5px;
+}
+.ai-header-info p { font-size: 10px; color: var(--cyan); margin-top: 1px; }
+.ai-close {
+  margin-left: auto; background: none; border: none;
+  color: var(--muted); font-size: 18px; cursor: pointer;
+  padding: 4px 8px; border-radius: 8px; transition: all .2s;
+}
+.ai-close:hover { color: var(--red); }
+.ai-messages {
+  flex: 1; overflow-y: auto; padding: 16px;
+  display: flex; flex-direction: column; gap: 12px;
+  scrollbar-width: thin; scrollbar-color: var(--border) transparent;
+}
+.ai-msg {
+  max-width: 88%; padding: 10px 14px;
+  border-radius: 14px; font-size: 13px; line-height: 1.6;
+  animation: fadeIn .3s ease;
+}
+.ai-msg.bot {
+  background: rgba(0,200,255,0.08);
+  border: 1px solid rgba(0,200,255,0.18);
+  color: var(--text); align-self: flex-start;
+  border-bottom-left-radius: 4px;
+}
+.ai-msg.user {
+  background: linear-gradient(135deg, rgba(30,91,191,0.5), rgba(0,200,255,0.2));
+  border: 1px solid rgba(0,200,255,0.25);
+  color: var(--white); align-self: flex-end;
+  border-bottom-right-radius: 4px;
+}
+.ai-msg.thinking {
+  background: rgba(0,200,255,0.05);
+  border: 1px solid rgba(0,200,255,0.12);
+  align-self: flex-start; border-bottom-left-radius: 4px;
+}
+.ai-dots { display: flex; gap: 4px; align-items: center; padding: 2px 0; }
+.ai-dots span {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--cyan); opacity: .4;
+  animation: aiDot .9s infinite;
+}
+.ai-dots span:nth-child(2) { animation-delay: .15s; }
+.ai-dots span:nth-child(3) { animation-delay: .3s; }
+@keyframes aiDot {
+  0%,80%,100% { opacity:.2; transform: scale(.8); }
+  40% { opacity:1; transform: scale(1.2); }
+}
+.ai-quick-btns {
+  display: flex; flex-wrap: wrap; gap: 6px;
+  padding: 0 16px 12px;
+}
+.ai-quick-btn {
+  background: rgba(0,200,255,0.07);
+  border: 1px solid rgba(0,200,255,0.22);
+  color: var(--cyan); font-size: 11px; font-weight: 600;
+  padding: 5px 10px; border-radius: 20px;
+  cursor: pointer; transition: all .2s;
+  font-family: 'Noto Sans', sans-serif;
+}
+.ai-quick-btn:hover { background: rgba(0,200,255,0.15); transform: translateY(-1px); }
+.ai-input-row {
+  display: flex; gap: 8px; padding: 12px 16px;
+  border-top: 1px solid var(--border);
+  background: rgba(0,0,0,0.2);
+}
+.ai-input {
+  flex: 1; background: rgba(0,200,255,0.05);
+  border: 1px solid var(--border); border-radius: 10px;
+  color: var(--text); font-size: 13px; padding: 10px 14px;
+  font-family: 'Noto Sans', sans-serif; outline: none;
+  transition: border-color .2s;
+}
+.ai-input:focus { border-color: var(--cyan); }
+.ai-input::placeholder { color: var(--muted); }
+.ai-send {
+  width: 40px; height: 40px; border-radius: 10px;
+  background: linear-gradient(135deg, #1e5bbf, #00c8ff);
+  border: none; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 16px; transition: all .2s; flex-shrink: 0;
+}
+.ai-send:hover { transform: scale(1.08); box-shadow: 0 4px 14px rgba(0,200,255,0.4); }
+.ai-send:disabled { opacity: .5; cursor: not-allowed; transform: none; }
+@media (max-width: 480px) {
+  #aiPanel { width: calc(100vw - 20px); right: 10px; }
+}
+</style>
+</head>
+<body>
+
+<!-- ══════════ AI ТУСЛАХ ══════════ -->
+<button id="aiBtn" onclick="toggleAI()" title="AI Туслах">🤖</button>
+
+<div id="aiPanel" class="hidden">
+  <div class="ai-header">
+    <div class="ai-avatar">🤖</div>
+    <div class="ai-header-info">
+      <h4>IET AI ТУСЛАХ</h4>
+      <p>Дүн · Хуваарь · Зөвлөгөө</p>
+    </div>
+    <button class="ai-close" onclick="toggleAI()">✕</button>
+  </div>
+  <div class="ai-messages" id="aiMessages">
+    <div class="ai-msg bot">Сайн байна уу! 👋 Би таны <b>IET оюутны AI туслах</b> байна. Дүн тайлбарлах, хуваарь харах, GPA сайжруулах зөвлөгөө өгөх боломжтой. Нэвтэрч орсны дараа илүү дэлгэрэнгүй туслах болно!</div>
+  </div>
+  <div class="ai-quick-btns" id="aiQuickBtns">
+    <button class="ai-quick-btn" onclick="aiQuick('Миний дүнг тайлбарла')">📊 Дүн тайлбар</button>
+    <button class="ai-quick-btn" onclick="aiQuick('Өнөөдрийн хуваарь')">📅 Хуваарь</button>
+    <button class="ai-quick-btn" onclick="aiQuick('GPA сайжруулах зөвлөгөө өг')">🎯 GPA зөвлөгөө</button>
+    <button class="ai-quick-btn" onclick="aiQuick('Хамгийн сул хичээл минь юу вэ?')">⚠️ Сул хичээл</button>
+  </div>
+  <div class="ai-input-row">
+    <input class="ai-input" id="aiInput" placeholder="Асуулт бичнэ үү..." onkeydown="if(event.key==='Enter')aiSend()"/>
+    <button class="ai-send" id="aiSendBtn" onclick="aiSend()">➤</button>
+  </div>
+</div>
+
+<div id="particles"></div>
+
+<!-- ══════════ AUTH MODALS ══════════ -->
+
+<!-- ── GMAIL OTP MODAL ── -->
+<div class="auth-overlay hidden" id="modalGmail">
+  <div class="auth-modal">
+    <div class="auth-header">
+      <div class="auth-header-icon" style="background:rgba(234,67,53,0.15);">
+        <svg width="22" height="22" viewBox="0 0 24 24"><path fill="#ea4335" d="M24 5.457v13.909c0 .904-.732 1.636-1.636 1.636h-3.819V11.73L12 16.64l-6.545-4.91v9.273H1.636A1.636 1.636 0 0 1 0 19.366V5.457c0-2.023 2.309-3.178 3.927-1.964L5.455 4.64 12 9.548l6.545-4.910 1.528-1.145C21.69 2.28 24 3.434 24 5.457z"/></svg>
+      </div>
+      <div>
+        <h3>Gmail-ээр нэвтрэх</h3>
+        <p>Имэйл хаяг руу баталгаажуулах код илгээнэ</p>
+      </div>
+      <button class="auth-close" onclick="closeModal('modalGmail')">✕</button>
+    </div>
+    <div class="auth-body">
+      <div class="auth-steps">
+        <div class="auth-step">
+          <div class="step-dot active" id="gs1">1</div>
+          <div class="step-label active" id="gsl1">Имэйл</div>
+        </div>
+        <div class="step-line" id="gline1"></div>
+        <div class="auth-step">
+          <div class="step-dot" id="gs2">2</div>
+          <div class="step-label" id="gsl2">OTP Код</div>
+        </div>
+        <div class="step-line" id="gline2"></div>
+        <div class="auth-step">
+          <div class="step-dot" id="gs3">3</div>
+          <div class="step-label" id="gsl3">Дууссан</div>
+        </div>
+      </div>
+
+      <div id="gstep1">
+        <div class="af-group">
+          <label>Gmail хаяг</label>
+          <input type="email" id="gEmailIn" placeholder="example@gmail.com" />
+        </div>
+        <div class="auth-msg" id="gMsg1"></div>
+        <button class="btn-auth" onclick="gmailSendOTP()">📧 КОД ИЛГЭЭХ</button>
+      </div>
+
+      <div id="gstep2" style="display:none">
+        <div class="otp-box visible">
+          <div class="otp-title">📨 БАТАЛГААЖУУЛАХ КОД</div>
+          <div class="otp-desc" id="gOtpDesc">Таны Gmail хаяг руу 6 оронтой код илгээлээ.<br>Хугацаа: <span class="otp-timer" id="gTimer">3:00</span></div>
+          <div class="otp-inputs">
+            <input class="otp-digit" id="go1" maxlength="1" oninput="otpNav(this,'go2')" onkeydown="otpBack(event,this,'')">
+            <input class="otp-digit" id="go2" maxlength="1" oninput="otpNav(this,'go3')" onkeydown="otpBack(event,this,'go1')">
+            <input class="otp-digit" id="go3" maxlength="1" oninput="otpNav(this,'go4')" onkeydown="otpBack(event,this,'go2')">
+            <input class="otp-digit" id="go4" maxlength="1" oninput="otpNav(this,'go5')" onkeydown="otpBack(event,this,'go3')">
+            <input class="otp-digit" id="go5" maxlength="1" oninput="otpNav(this,'go6')" onkeydown="otpBack(event,this,'go4')">
+            <input class="otp-digit" id="go6" maxlength="1" oninput="otpNav(this,'')" onkeydown="otpBack(event,this,'go5')">
+          </div>
+          <div class="otp-resend">Код ирээгүй? <a onclick="gmailResend()">Дахин илгээх</a></div>
+        </div>
+        <div class="auth-msg" id="gMsg2"></div>
+        <button class="btn-auth" onclick="gmailVerify()">✓ БАТАЛГААЖУУЛАХ</button>
+        <button class="btn-auth-sec" onclick="gmailBack()">← Буцах</button>
+      </div>
+
+      <div id="gstep3" style="display:none; text-align:center; padding: 20px 0;">
+        <div style="font-size:52px; margin-bottom:16px;">✅</div>
+        <div style="font-family:'Orbitron',sans-serif; font-size:14px; font-weight:700; color:var(--green); margin-bottom:8px;">АМЖИЛТТАЙ!</div>
+        <div style="font-size:13px; color:var(--muted); margin-bottom:20px;">Gmail баталгаажлаа. Нэвтэрч байна...</div>
+        <div class="gmail-badge" style="margin: 0 auto; width:fit-content;">
+          <div class="dot connected"></div> Gmail холбогдсон
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── PHONE OTP MODAL ── -->
+<div class="auth-overlay hidden" id="modalPhone">
+  <div class="auth-modal">
+    <div class="auth-header">
+      <div class="auth-header-icon" style="background:rgba(0,200,255,0.1);">
+        <span style="font-size:22px;">📱</span>
+      </div>
+      <div>
+        <h3>Утасны дугаараар нэвтрэх</h3>
+        <p>Дугаар руу SMS баталгаажуулах код илгээнэ</p>
+      </div>
+      <button class="auth-close" onclick="closeModal('modalPhone')">✕</button>
+    </div>
+    <div class="auth-body">
+      <div class="auth-steps">
+        <div class="auth-step">
+          <div class="step-dot active" id="ps1">1</div>
+          <div class="step-label active">Дугаар</div>
+        </div>
+        <div class="step-line" id="pline1"></div>
+        <div class="auth-step">
+          <div class="step-dot" id="ps2">2</div>
+          <div class="step-label">SMS Код</div>
+        </div>
+        <div class="step-line" id="pline2"></div>
+        <div class="auth-step">
+          <div class="step-dot" id="ps3">3</div>
+          <div class="step-label">Дууссан</div>
+        </div>
+      </div>
+
+      <div id="pstep1">
+        <div class="af-group">
+          <label>Утасны дугаар</label>
+          <div class="bank-input-phone" style="position:relative;">
+            <span class="bank-phone-prefix" style="position:absolute;left:14px;top:50%;transform:translateY(-50%);color:var(--cyan);font-weight:700;font-size:13px;z-index:1">+976</span>
+            <input type="tel" id="pPhoneIn" placeholder="8800 0000" maxlength="8" style="padding-left:58px !important;" oninput="this.value=this.value.replace(/\D/g,'')"/>
+          </div>
+        </div>
+        <div class="auth-msg" id="pMsg1"></div>
+        <button class="btn-auth" onclick="phoneSendOTP()">📲 SMS КОД ИЛГЭЭХ</button>
+      </div>
+
+      <div id="pstep2" style="display:none">
+        <div class="otp-box visible">
+          <div class="otp-title">💬 SMS БАТАЛГААЖУУЛАХ КОД</div>
+          <div class="otp-desc" id="pOtpDesc">+976 <span id="pPhoneDisplay"></span> дугаарт код илгээлээ.<br>Хугацаа: <span class="otp-timer" id="pTimer">3:00</span></div>
+          <div class="otp-inputs">
+            <input class="otp-digit" id="po1" maxlength="1" oninput="otpNav(this,'po2')" onkeydown="otpBack(event,this,'')">
+            <input class="otp-digit" id="po2" maxlength="1" oninput="otpNav(this,'po3')" onkeydown="otpBack(event,this,'po1')">
+            <input class="otp-digit" id="po3" maxlength="1" oninput="otpNav(this,'po4')" onkeydown="otpBack(event,this,'po2')">
+            <input class="otp-digit" id="po4" maxlength="1" oninput="otpNav(this,'po5')" onkeydown="otpBack(event,this,'po3')">
+            <input class="otp-digit" id="po5" maxlength="1" oninput="otpNav(this,'po6')" onkeydown="otpBack(event,this,'po4')">
+            <input class="otp-digit" id="po6" maxlength="1" oninput="otpNav(this,'')" onkeydown="otpBack(event,this,'po5')">
+          </div>
+          <div class="otp-resend">Код ирээгүй? <a onclick="phoneResend()">Дахин илгээх</a></div>
+        </div>
+        <div class="auth-msg" id="pMsg2"></div>
+        <button class="btn-auth" onclick="phoneVerify()">✓ БАТАЛГААЖУУЛАХ</button>
+        <button class="btn-auth-sec" onclick="phoneBack()">← Буцах</button>
+      </div>
+
+      <div id="pstep3" style="display:none; text-align:center; padding: 20px 0;">
+        <div style="font-size:52px; margin-bottom:16px;">✅</div>
+        <div style="font-family:'Orbitron',sans-serif; font-size:14px; font-weight:700; color:var(--green); margin-bottom:8px;">АМЖИЛТТАЙ!</div>
+        <div style="font-size:13px; color:var(--muted); margin-bottom:20px;">Утасны дугаар баталгаажлаа. Нэвтэрч байна...</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── QPAY MODAL ── -->
+<div class="auth-overlay hidden" id="modalQpay">
+  <div class="auth-modal">
+    <div class="auth-header">
+      <div class="auth-header-icon" style="background:rgba(0,150,255,0.15);">
+        <span style="font-size:22px;">💳</span>
+      </div>
+      <div>
+        <h3>QPay-р нэвтрэх / Төлбөр</h3>
+        <p>QPay QR код уншуулж баталгаажуулна</p>
+      </div>
+      <button class="auth-close" onclick="closeModal('modalQpay')">✕</button>
+    </div>
+    <div class="auth-body">
+      <div class="qpay-modal">
+        <div class="qpay-amount" id="qpayAmount">₮0</div>
+        <div class="qpay-amount-label" id="qpayLabel">Нэвтрэх баталгаажуулалт</div>
+        <div class="qpay-qr" id="qpayQrBox">
+          <canvas id="qpayQrCanvas" width="156" height="156"></canvas>
+        </div>
+        <div class="qpay-apps">
+          <span class="qpay-app" style="color:#0096ff;border-color:rgba(0,150,255,0.4)" onclick="qpayOpenApp('QPay')">QPay</span>
+          <span class="qpay-app" style="color:#00b478;border-color:rgba(0,180,120,0.4)" onclick="qpayOpenApp('Хаан банк')">Хаан банк</span>
+          <span class="qpay-app" style="color:#1e5bbf;border-color:rgba(30,91,191,0.4)" onclick="qpayOpenApp('Төрийн банк')">Төрийн банк</span>
+          <span class="qpay-app" style="color:#dc3545;border-color:rgba(220,53,69,0.4)" onclick="qpayOpenApp('Голомт')">Голомт</span>
+          <span class="qpay-app" style="color:#ff8c00;border-color:rgba(255,140,0,0.4)" onclick="qpayOpenApp('TDB')">TDB</span>
+        </div>
+        <div class="qpay-desc">Дээрх QR кодыг банкны апп-аар уншуулна уу.<br>Амжилттай уншуулсны дараа автоматаар баталгаажина.</div>
+        <div class="auth-msg info" id="qpayMsg" style="margin-top:14px;">QR код хүлээгдэж байна...</div>
+        <button class="btn-auth" style="margin-top:14px;" onclick="qpayCheck()">🔄 ШАЛГАХ</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── KHAN BANK MODAL ── -->
+<div class="auth-overlay hidden" id="modalKhan">
+  <div class="auth-modal">
+    <div class="auth-header">
+      <div class="auth-header-icon" style="background:rgba(0,180,120,0.15);">
+        <span style="font-size:22px;">🏦</span>
+      </div>
+      <div>
+        <h3>Хаан банкаар нэвтрэх</h3>
+        <p>Хаан банкны апп / данс мэдээллээр баталгаажуулна</p>
+      </div>
+      <button class="auth-close" onclick="closeModal('modalKhan')">✕</button>
+    </div>
+    <div class="auth-body">
+      <div class="bank-redirect">
+        <div class="bank-logo-big" style="background:rgba(0,180,120,0.12);border-color:rgba(0,180,120,0.3);">🏦</div>
+        <h4 style="color:#00b478;">Хаан Банк</h4>
+        <p>Утасны дугаар эсвэл данс руу баталгаажуулах код илгээнэ. Хаан банкны аппыг нээж зөвшөөрнө үү.</p>
+      </div>
+
+      <div class="auth-tabs" style="margin-bottom:18px">
+        <button class="auth-tab active" onclick="khanTab('sms',this)">📱 SMS</button>
+        <button class="auth-tab" onclick="khanTab('app',this)">📲 Апп</button>
+        <button class="auth-tab" onclick="khanTab('account',this)">🏧 Данс</button>
+      </div>
+
+      <div id="khanSms">
+        <div class="af-group">
+          <label>Бүртгэлтэй утасны дугаар</label>
+          <div style="position:relative;">
+            <span style="position:absolute;left:14px;top:50%;transform:translateY(-50%);color:#00b478;font-weight:700;font-size:13px;">+976</span>
+            <input type="tel" id="khanPhone" placeholder="8800 0000" maxlength="8" style="padding-left:58px !important;" oninput="this.value=this.value.replace(/\D/g,'')"/>
+          </div>
+        </div>
+        <div class="auth-msg" id="khanMsg"></div>
+        <div class="otp-box" id="khanOtpBox">
+          <div class="otp-title" style="color:#00b478;">🏦 ХААН БАНК OTP КОД</div>
+          <div class="otp-desc">SMS хүлээгдэж байна...<br>Хугацаа: <span class="otp-timer" id="khanTimer">3:00</span></div>
+          <div class="otp-inputs">
+            <input class="otp-digit" id="kh1" maxlength="1" oninput="otpNav(this,'kh2')" onkeydown="otpBack(event,this,'')">
+            <input class="otp-digit" id="kh2" maxlength="1" oninput="otpNav(this,'kh3')" onkeydown="otpBack(event,this,'kh1')">
+            <input class="otp-digit" id="kh3" maxlength="1" oninput="otpNav(this,'kh4')" onkeydown="otpBack(event,this,'kh2')">
+            <input class="otp-digit" id="kh4" maxlength="1" oninput="otpNav(this,'kh5')" onkeydown="otpBack(event,this,'kh3')">
+            <input class="otp-digit" id="kh5" maxlength="1" oninput="otpNav(this,'kh6')" onkeydown="otpBack(event,this,'kh4')">
+            <input class="otp-digit" id="kh6" maxlength="1" oninput="otpNav(this,'')" onkeydown="otpBack(event,this,'kh5')">
+          </div>
+        </div>
+        <button class="btn-auth" id="khanSmsBtn" onclick="khanSendSMS()" style="background:linear-gradient(135deg,#00b478,#00e5a0);color:#0a2a1a;">🏦 КОД ИЛГЭЭХ</button>
+        <button class="btn-auth" id="khanVerifyBtn" onclick="khanVerify()" style="display:none;background:linear-gradient(135deg,#00b478,#00e5a0);color:#0a2a1a;">✓ БАТАЛГААЖУУЛАХ</button>
+      </div>
+
+      <div id="khanApp" style="display:none; text-align:center; padding:10px 0;">
+        <p style="font-size:12px;color:var(--muted);margin-bottom:16px;">Хаан банкны апп-ыг нээж "IET Портал"-аас зөвшөөрлийн хүсэлт хүлээж авна уу.</p>
+        <div style="font-size:48px;margin-bottom:14px;">📲</div>
+        <div class="auth-msg info">Апп нээгдэхийг хүлээж байна...</div>
+        <button class="btn-auth" style="margin-top:12px;background:linear-gradient(135deg,#00b478,#00e5a0);color:#0a2a1a;" onclick="khanAppOpen()">📲 АПП НЭЭХ</button>
+      </div>
+
+      <div id="khanAccount" style="display:none;">
+        <div class="af-group">
+          <label>Дансны дугаар</label>
+          <input type="text" id="khanAccNum" placeholder="5000 0000 00" maxlength="12" oninput="this.value=this.value.replace(/\D/g,'')"/>
+        </div>
+        <div class="af-group">
+          <label>Данс эзэмшигчийн нэр</label>
+          <input type="text" id="khanAccName" placeholder="Овог Нэр"/>
+        </div>
+        <div class="auth-msg" id="khanAccMsg"></div>
+        <button class="btn-auth" style="background:linear-gradient(135deg,#00b478,#00e5a0);color:#0a2a1a;" onclick="khanAccountVerify()">✓ БАТАЛГААЖУУЛАХ</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── STATE BANK MODAL ── -->
+<div class="auth-overlay hidden" id="modalState">
+  <div class="auth-modal">
+    <div class="auth-header">
+      <div class="auth-header-icon" style="background:rgba(30,91,191,0.15);">
+        <span style="font-size:22px;">🏛️</span>
+      </div>
+      <div>
+        <h3>Төрийн банкаар нэвтрэх</h3>
+        <p>Төрийн банкны данс мэдээллээр баталгаажуулна</p>
+      </div>
+      <button class="auth-close" onclick="closeModal('modalState')">✕</button>
+    </div>
+    <div class="auth-body">
+      <div class="bank-redirect">
+        <div class="bank-logo-big" style="background:rgba(30,91,191,0.12);border-color:rgba(30,91,191,0.3);">🏛️</div>
+        <h4 style="color:#1e5bbf;">Төрийн Банк</h4>
+        <p>Утасны дугаар руу SMS баталгаажуулах код илгээнэ.</p>
+      </div>
+      <div class="af-group">
+        <label>Бүртгэлтэй утасны дугаар</label>
+        <div style="position:relative;">
+          <span style="position:absolute;left:14px;top:50%;transform:translateY(-50%);color:#1e5bbf;font-weight:700;font-size:13px;">+976</span>
+          <input type="tel" id="statePhone" placeholder="8800 0000" maxlength="8" style="padding-left:58px !important;" oninput="this.value=this.value.replace(/\D/g,'')"/>
+        </div>
+      </div>
+      <div class="auth-msg" id="stateMsg"></div>
+      <div class="otp-box" id="stateOtpBox">
+        <div class="otp-title" style="color:#1e5bbf;">🏛️ ТӨРИЙН БАНК OTP</div>
+        <div class="otp-desc">SMS хүлээгдэж байна...<br>Хугацаа: <span class="otp-timer" id="stateTimer">3:00</span></div>
+        <div class="otp-inputs">
+          <input class="otp-digit" id="sb1" maxlength="1" oninput="otpNav(this,'sb2')" onkeydown="otpBack(event,this,'')">
+          <input class="otp-digit" id="sb2" maxlength="1" oninput="otpNav(this,'sb3')" onkeydown="otpBack(event,this,'sb1')">
+          <input class="otp-digit" id="sb3" maxlength="1" oninput="otpNav(this,'sb4')" onkeydown="otpBack(event,this,'sb2')">
+          <input class="otp-digit" id="sb4" maxlength="1" oninput="otpNav(this,'sb5')" onkeydown="otpBack(event,this,'sb3')">
+          <input class="otp-digit" id="sb5" maxlength="1" oninput="otpNav(this,'sb6')" onkeydown="otpBack(event,this,'sb4')">
+          <input class="otp-digit" id="sb6" maxlength="1" oninput="otpNav(this,'')" onkeydown="otpBack(event,this,'sb5')">
+        </div>
+      </div>
+      <button class="btn-auth" id="stateSmsBtn" onclick="stateSendSMS()" style="background:linear-gradient(135deg,#1e5bbf,#00c8ff);color:#fff;">🏛️ КОД ИЛГЭЭХ</button>
+      <button class="btn-auth" id="stateVerifyBtn" onclick="stateVerify()" style="display:none;background:linear-gradient(135deg,#1e5bbf,#00c8ff);color:#fff;">✓ БАТАЛГААЖУУЛАХ</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── REGISTER MODAL ── -->
+<div class="auth-overlay hidden" id="modalRegister">
+  <div class="auth-modal" style="max-width:520px;">
+    <div class="auth-header">
+      <div class="auth-header-icon" style="background:rgba(0,200,255,0.1);">
+        <span style="font-size:22px;">🎓</span>
+      </div>
+      <div>
+        <h3>Шинэ оюутан бүртгэл</h3>
+        <p>Эхлээд нэвтрэх аргаа сонго</p>
+      </div>
+      <button class="auth-close" onclick="closeModal('modalRegister')">✕</button>
+    </div>
+    <div class="auth-body">
+      <div class="auth-tabs">
+        <button class="auth-tab active" onclick="regTab('email',this)">📧 Имэйл</button>
+        <button class="auth-tab" onclick="regTab('phone',this)">📱 Утас</button>
+        <button class="auth-tab" onclick="regTab('bank',this)">🏦 Банк</button>
+      </div>
+
+      <!-- Email Register -->
+      <div id="regEmail">
+        <div class="auth-steps" style="margin-bottom:18px;">
+          <div class="auth-step"><div class="step-dot active" id="re1">1</div><div class="step-label active">Мэдээлэл</div></div>
+          <div class="step-line" id="reline1"></div>
+          <div class="auth-step"><div class="step-dot" id="re2">2</div><div class="step-label">Имэйл OTP</div></div>
+          <div class="step-line" id="reline2"></div>
+          <div class="auth-step"><div class="step-dot" id="re3">3</div><div class="step-label">Дууссан</div></div>
+        </div>
+
+        <div id="reStep1">
+          <div class="af-row">
+            <div class="af-group"><label>Овог</label><input type="text" id="reLname" placeholder="Дорж"/></div>
+            <div class="af-group"><label>Нэр</label><input type="text" id="reFname" placeholder="Батаа"/></div>
+          </div>
+          <div class="af-group"><label>Оюутны ID</label><input type="text" id="reStudId" placeholder="IET2024001"/></div>
+          <div class="af-group">
+            <label>Gmail хаяг</label>
+            <input type="email" id="reEmail" placeholder="example@gmail.com"/>
+          </div>
+          <div class="af-row">
+            <div class="af-group"><label>Нууц үг</label><input type="password" id="rePwd" placeholder="••••••••"/></div>
+            <div class="af-group"><label>Давтах</label><input type="password" id="rePwd2" placeholder="••••••••"/></div>
+          </div>
+          <div class="af-group">
+            <label>Тэнхим</label>
+            <select id="reDept">
+              <option value="">Сонгоно уу...</option>
+              <option>Мэдээллийн технологи</option>
+              <option>Дизайн ба медиа технологи</option>
+              <option>Програм хангамж</option>
+              <option>Сүлжээний инженерчлэл</option>
+            </select>
+          </div>
+          <div class="auth-msg" id="reMsg1"></div>
+          <button class="btn-auth" onclick="regEmailStep1()">ДАРААХ →</button>
+        </div>
+
+        <div id="reStep2" style="display:none">
+          <div class="otp-box visible">
+            <div class="otp-title">📧 ИМЭЙЛ БАТАЛГААЖУУЛАЛТ</div>
+            <div class="otp-desc" id="reOtpDesc">Gmail хаяг руу 6 оронтой код илгээлээ.<br>Хугацаа: <span class="otp-timer" id="reTimer">3:00</span></div>
+            <div class="otp-inputs">
+              <input class="otp-digit" id="re_o1" maxlength="1" oninput="otpNav(this,'re_o2')" onkeydown="otpBack(event,this,'')">
+              <input class="otp-digit" id="re_o2" maxlength="1" oninput="otpNav(this,'re_o3')" onkeydown="otpBack(event,this,'re_o1')">
+              <input class="otp-digit" id="re_o3" maxlength="1" oninput="otpNav(this,'re_o4')" onkeydown="otpBack(event,this,'re_o2')">
+              <input class="otp-digit" id="re_o4" maxlength="1" oninput="otpNav(this,'re_o5')" onkeydown="otpBack(event,this,'re_o3')">
+              <input class="otp-digit" id="re_o5" maxlength="1" oninput="otpNav(this,'re_o6')" onkeydown="otpBack(event,this,'re_o4')">
+              <input class="otp-digit" id="re_o6" maxlength="1" oninput="otpNav(this,'')" onkeydown="otpBack(event,this,'re_o5')">
+            </div>
+            <div class="otp-resend">Код ирээгүй? <a onclick="regResendEmail()">Дахин илгээх</a></div>
+          </div>
+          <div class="auth-msg" id="reMsg2"></div>
+          <button class="btn-auth" onclick="regEmailStep2()">✓ БАТАЛГААЖУУЛАХ</button>
+          <button class="btn-auth-sec" onclick="reShowStep1()">← Буцах</button>
+        </div>
+
+        <div id="reStep3" style="display:none;text-align:center;padding:20px 0;">
+          <div style="font-size:52px;margin-bottom:16px;">🎉</div>
+          <div style="font-family:'Orbitron',sans-serif;font-size:14px;font-weight:700;color:var(--green);margin-bottom:8px;">БҮРТГЭЛ АМЖИЛТТАЙ!</div>
+          <div class="reg-confirm" id="regConfirmBox" style="text-align:left;margin-top:16px;"></div>
+          <button class="btn-auth" style="margin-top:8px;" onclick="closeModal('modalRegister');doLogin()">НЭВТРЭХ →</button>
+        </div>
+      </div>
+
+      <!-- Phone Register -->
+      <div id="regPhone" style="display:none;">
+        <div class="af-group">
+          <label>Утасны дугаар</label>
+          <div style="position:relative;">
+            <span style="position:absolute;left:14px;top:50%;transform:translateY(-50%);color:var(--cyan);font-weight:700;font-size:13px;">+976</span>
+            <input type="tel" id="regPhoneNum" placeholder="8800 0000" maxlength="8" style="padding-left:58px !important;" oninput="this.value=this.value.replace(/\D/g,'')"/>
+          </div>
+        </div>
+        <div class="af-row">
+          <div class="af-group"><label>Овог</label><input id="rpLname" type="text" placeholder="Дорж"/></div>
+          <div class="af-group"><label>Нэр</label><input id="rpFname" type="text" placeholder="Батаа"/></div>
+        </div>
+        <div class="af-group"><label>Оюутны ID</label><input type="text" id="rpStudId" placeholder="IET2024001"/></div>
+        <div class="auth-msg" id="rpMsg1"></div>
+        <div class="otp-box" id="rpOtpBox">
+          <div class="otp-title">📱 SMS БАТАЛГААЖУУЛАЛТ</div>
+          <div class="otp-desc">SMS код хүлээгдэж байна...<br>Хугацаа: <span class="otp-timer" id="rpTimer">3:00</span></div>
+          <div class="otp-inputs">
+            <input class="otp-digit" id="rp_o1" maxlength="1" oninput="otpNav(this,'rp_o2')" onkeydown="otpBack(event,this,'')">
+            <input class="otp-digit" id="rp_o2" maxlength="1" oninput="otpNav(this,'rp_o3')" onkeydown="otpBack(event,this,'rp_o1')">
+            <input class="otp-digit" id="rp_o3" maxlength="1" oninput="otpNav(this,'rp_o4')" onkeydown="otpBack(event,this,'rp_o2')">
+            <input class="otp-digit" id="rp_o4" maxlength="1" oninput="otpNav(this,'rp_o5')" onkeydown="otpBack(event,this,'rp_o3')">
+            <input class="otp-digit" id="rp_o5" maxlength="1" oninput="otpNav(this,'rp_o6')" onkeydown="otpBack(event,this,'rp_o4')">
+            <input class="otp-digit" id="rp_o6" maxlength="1" oninput="otpNav(this,'')" onkeydown="otpBack(event,this,'rp_o5')">
+          </div>
+        </div>
+        <button class="btn-auth" id="rpSendBtn" onclick="regPhoneSend()">📲 КОД ИЛГЭЭХ</button>
+        <button class="btn-auth" id="rpVerifyBtn" onclick="regPhoneVerify()" style="display:none;">✓ БАТАЛГААЖУУЛАХ</button>
+      </div>
+
+      <!-- Bank Register -->
+      <div id="regBank" style="display:none;">
+        <p style="font-size:12px;color:var(--muted);margin-bottom:16px;text-align:center;">Банкаар бүртгүүлэхийн тулд дансны мэдээллийг ашиглан баталгаажуулна.</p>
+        <div class="social-grid" style="grid-template-columns:1fr 1fr;">
+          <button class="social-btn sb-khan" onclick="openModal('modalKhan')">
+            <div class="sb-icon">🏦</div>
+            <div class="sb-text"><span class="sb-label">Хаан банк</span><span class="sb-sub">Khan Bank</span></div>
+          </button>
+          <button class="social-btn sb-state" onclick="openModal('modalState')">
+            <div class="sb-icon">🏛️</div>
+            <div class="sb-text"><span class="sb-label">Төрийн банк</span><span class="sb-sub">State Bank</span></div>
+          </button>
+          <button class="social-btn sb-golomt" onclick="bankNotImpl('Голомт банк')">
+            <div class="sb-icon">🏧</div>
+            <div class="sb-text"><span class="sb-label">Голомт банк</span><span class="sb-sub">Golomt Bank</span></div>
+          </button>
+          <button class="social-btn sb-tdb" onclick="bankNotImpl('TDB банк')">
+            <div class="sb-icon">💼</div>
+            <div class="sb-text"><span class="sb-label">TDB банк</span><span class="sb-sub">Trade Dev. Bank</span></div>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── PAYMENT MODAL ── -->
+<div class="auth-overlay hidden" id="modalPayment">
+  <div class="auth-modal">
+    <div class="auth-header">
+      <div class="auth-header-icon" style="background:rgba(245,166,35,0.15);">
+        <span style="font-size:22px;">💰</span>
+      </div>
+      <div>
+        <h3>Сургалтын төлбөр</h3>
+        <p>Төлбөрийн аргаа сонгоно уу</p>
+      </div>
+      <button class="auth-close" onclick="closeModal('modalPayment')">✕</button>
+    </div>
+    <div class="auth-body">
+      <div class="tuition-info">
+        <div class="tuition-item"><div class="tv">₮450,000</div><div class="tl">Улирлын төлбөр</div></div>
+        <div class="tuition-item"><div class="tv" style="color:var(--red);">₮450,000</div><div class="tl">Үлдэгдэл</div></div>
+        <div class="tuition-item"><div class="tv" style="color:var(--green);">₮0</div><div class="tl">Төлсөн</div></div>
+      </div>
+      <div style="font-size:12px;color:var(--cyan);font-weight:700;letter-spacing:.5px;text-transform:uppercase;margin-bottom:12px;">Төлбөрийн арга сонгох</div>
+      <div class="pay-methods">
+        <div class="pay-method-btn" style="border-color:rgba(0,150,255,0.3)" onclick="payWith('QPay')">
+          <div class="pm-icon">💳</div>
+          <div class="pm-name">QPay</div>
+          <div class="pm-sub">QR код</div>
+        </div>
+        <div class="pay-method-btn" style="border-color:rgba(0,180,120,0.3)" onclick="payWith('Хаан банк')">
+          <div class="pm-icon">🏦</div>
+          <div class="pm-name">Хаан банк</div>
+          <div class="pm-sub">Шилжүүлэг</div>
+        </div>
+        <div class="pay-method-btn" style="border-color:rgba(30,91,191,0.3)" onclick="payWith('Төрийн банк')">
+          <div class="pm-icon">🏛️</div>
+          <div class="pm-name">Төрийн банк</div>
+          <div class="pm-sub">Шилжүүлэг</div>
+        </div>
+        <div class="pay-method-btn" style="border-color:rgba(220,53,69,0.3)" onclick="payWith('Голомт')">
+          <div class="pm-icon">🏧</div>
+          <div class="pm-name">Голомт</div>
+          <div class="pm-sub">Шилжүүлэг</div>
+        </div>
+        <div class="pay-method-btn" style="border-color:rgba(255,140,0,0.3)" onclick="payWith('TDB')">
+          <div class="pm-icon">💼</div>
+          <div class="pm-name">TDB</div>
+          <div class="pm-sub">Шилжүүлэг</div>
+        </div>
+        <div class="pay-method-btn" style="border-color:rgba(234,67,53,0.3)" onclick="payWith('Карт')">
+          <div class="pm-icon">💳</div>
+          <div class="pm-name">Карт</div>
+          <div class="pm-sub">Visa/MC</div>
+        </div>
+      </div>
+      <div class="auth-msg" id="payMsg" style="margin-top:14px;"></div>
+    </div>
+  </div>
+</div>
+
+
+
+<!-- ═══════════ LOGIN ═══════════ -->
+<div id="loginPage">
+
+  <!-- ⚙️ Firebase/EmailJS тохиргооны анхааруулга (тохируулсны дараа автоматаар нуугдана) -->
+  <div id="setupBanner" style="position:fixed;top:0;left:0;right:0;z-index:9998;background:linear-gradient(135deg,rgba(245,166,35,0.95),rgba(232,131,42,0.95));padding:10px 20px;font-size:12px;font-family:'Noto Sans',sans-serif;display:flex;align-items:center;gap:12px;box-shadow:0 2px 20px rgba(0,0,0,.4);">
+    <span style="font-size:18px;">⚙️</span>
+    <div style="flex:1;">
+      <b style="color:#0b1832;">Firebase + EmailJS тохиргоо хийгдээгүй байна!</b>
+      <span style="color:#1a2a00;margin-left:8px;">Бодит имэйл OTP ажиллуулахын тулд <code style="background:rgba(0,0,0,.15);padding:1px 6px;border-radius:4px;">iet-portal-v3.html</code> файлын <b>&lt;head&gt;</b>-д Firebase болон EmailJS config-оо оруулна уу.</span>
+    </div>
+    <a href="#" onclick="document.getElementById('setupGuide').style.display='flex';return false;" style="color:#0b1832;font-weight:700;white-space:nowrap;text-decoration:underline;">Заавар үзэх →</a>
+    <button onclick="document.getElementById('setupBanner').style.display='none'" style="background:none;border:none;color:#0b1832;font-size:18px;cursor:pointer;padding:0 4px;">✕</button>
+  </div>
+
+  <!-- Setup guide overlay -->
+  <div id="setupGuide" style="display:none;position:fixed;inset:0;z-index:99998;background:rgba(4,9,22,.95);align-items:center;justify-content:center;padding:20px;">
+    <div style="background:var(--card);border:1px solid var(--border);border-radius:20px;padding:32px;max-width:580px;width:100%;max-height:90vh;overflow-y:auto;">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
+        <h3 style="font-family:'Orbitron',sans-serif;color:var(--cyan);font-size:15px;">⚙️ ТОХИРГООНЫ ЗААВАР</h3>
+        <button onclick="document.getElementById('setupGuide').style.display='none'" style="background:none;border:none;color:var(--muted);font-size:20px;cursor:pointer;">✕</button>
+      </div>
+
+      <div style="font-size:13px;line-height:1.8;color:var(--text);">
+
+        <div style="background:rgba(0,200,255,.07);border:1px solid rgba(0,200,255,.2);border-radius:10px;padding:14px;margin-bottom:16px;">
+          <b style="color:var(--cyan);">1️⃣ Firebase Firestore тохируулах</b><br>
+          <span style="color:var(--muted);">• <a href="https://console.firebase.google.com" target="_blank" style="color:var(--cyan);">console.firebase.google.com</a> → Шинэ project үүсгэх<br>
+          • Firestore Database → Create database → Production mode<br>
+          • Rules-ийг дараах байдлаар тохируулна:</span><br>
+          <code style="display:block;background:rgba(0,0,0,.4);padding:10px;border-radius:8px;margin-top:8px;font-size:11px;color:#00e5a0;">
+            rules_version = '2';<br>
+            service cloud.firestore {<br>
+            &nbsp;&nbsp;match /databases/{db}/documents {<br>
+            &nbsp;&nbsp;&nbsp;&nbsp;match /otp_codes/{doc} {<br>
+            &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;allow read, write: if true;<br>
+            &nbsp;&nbsp;&nbsp;&nbsp;}<br>
+            &nbsp;&nbsp;}<br>
+            }
+          </code>
+          <span style="color:var(--muted);font-size:11px;">• Project Settings → General → Your apps → Web app → SDK config-ийг копилоод &lt;head&gt;-д буулгана</span>
+        </div>
+
+        <div style="background:rgba(234,67,53,.07);border:1px solid rgba(234,67,53,.2);border-radius:10px;padding:14px;margin-bottom:16px;">
+          <b style="color:#ea4335;">2️⃣ EmailJS тохируулах (үнэгүй)</b><br>
+          <span style="color:var(--muted);">• <a href="https://emailjs.com" target="_blank" style="color:#ea4335;">emailjs.com</a> → Sign up (үнэгүй, сард 200 майл)<br>
+          • Email Services → Add Service → Gmail (өөрийн Gmail-аар)<br>
+          • Email Templates → Create Template:<br></span>
+          <code style="display:block;background:rgba(0,0,0,.4);padding:10px;border-radius:8px;margin-top:8px;font-size:11px;color:#f5a623;">
+            Subject: IET Портал — Баталгаажуулах код<br><br>
+            Сайн байна уу,<br><br>
+            Таны баталгаажуулах код: <b>&#123;&#123;otp_code&#125;&#125;</b><br><br>
+            Хүчинтэй хугацаа: &#123;&#123;valid_mins&#125;&#125; минут<br>
+            Зориулалт: &#123;&#123;context_msg&#125;&#125;<br><br>
+            &#123;&#123;app_name&#125;&#125;
+          </code>
+          <span style="color:var(--muted);font-size:11px;">• Account → API Keys → Public Key-г копилоно<br>
+          • To email талбарт: <code style="background:rgba(0,0,0,.3);padding:1px 5px;border-radius:4px;">&#123;&#123;to_email&#125;&#125;</code> гэж тохируулна</span>
+        </div>
+
+        <div style="background:rgba(0,200,255,.07);border:1px solid rgba(0,200,255,.2);border-radius:10px;padding:14px;">
+          <b style="color:var(--cyan);">3️⃣ HTML файлд тохиргоо оруулах</b><br>
+          <span style="color:var(--muted);font-size:12px;">iet-portal-v3.html файлын &lt;head&gt; хэсэгт дараах утгуудыг солино:</span>
+          <code style="display:block;background:rgba(0,0,0,.4);padding:10px;border-radius:8px;margin-top:8px;font-size:11px;color:#9b5de5;">
+            apiKey: "YOUR_API_KEY" → Firebase-ийн API key<br>
+            projectId: "YOUR_PROJECT_ID" → Project ID<br>
+            ...<br>
+            EMAILJS_PUBLIC_KEY = "YOUR_EMAILJS_PUBLIC_KEY"<br>
+            EMAILJS_SERVICE_ID = "YOUR_SERVICE_ID"<br>
+            EMAILJS_TEMPLATE_ID = "YOUR_TEMPLATE_ID"
+          </code>
+        </div>
+
+      </div>
+      <button onclick="document.getElementById('setupGuide').style.display='none'" style="width:100%;margin-top:20px;padding:12px;background:linear-gradient(135deg,var(--blue2),var(--cyan));color:var(--navy);border:none;border-radius:10px;font-family:'Orbitron',sans-serif;font-weight:700;font-size:13px;cursor:pointer;">ОЙЛГОЛОО</button>
+    </div>
+  </div>
+  <div class="login-wrap">
+    <div class="login-card">
+      <div class="login-logo">
+        <div class="logo-hexagon"><span>IET</span></div>
+        <h2>Техник Технологийн<br>Политехник Коллеж</h2>
+        <p>1984 оноос байгуулагдсан · Оюутны Портал</p>
+      </div>
+      <div class="login-title">НЭВТРЭХ</div>
+      <div class="login-sub">Оюутны ID болон нууц үгээ оруулна уу</div>
+      <div class="error-msg" id="errMsg">⚠ Оюутны ID эсвэл нууц үг буруу!</div>
+      <div class="fgroup">
+        <label>Оюутны ID</label>
+        <input id="inId" type="text" placeholder="IET2021001" autocomplete="off">
+      </div>
+      <div class="fgroup">
+        <label>Нууц үг</label>
+        <input id="inPw" type="password" placeholder="••••••••">
+      </div>
+      <button class="btn-login" onclick="doLogin()">НЭВТРЭХ →</button>
+
+      <div class="login-auth-row">
+        <span>Шинэ оюутан уу?</span>
+        <button class="auth-link-btn" onclick="openModal('modalRegister')">🎓 Бүртгүүлэх</button>
+      </div>
+
+
+      <div class="demo-accounts">
+        <p>Туршилтын акаунтууд</p>
+        <div class="demo-grid" style="max-height:200px;overflow-y:auto;padding-right:2px;">
+          <div class="demo-btn" onclick="fillDemo('IET2021001','1234')"><div class="dn">Батжаргал Д.</div><div class="did">IET2021001 · 1234</div></div>
+          <div class="demo-btn" onclick="fillDemo('IET2022015','5678')"><div class="dn">Оюунцэцэг Т.</div><div class="did">IET2022015 · 5678</div></div>
+          <div class="demo-btn" onclick="fillDemo('IET2020033','9999')"><div class="dn">Мөнхбаяр Г.</div><div class="did">IET2020033 · 9999</div></div>
+          <div class="demo-btn" onclick="fillDemo('IET2023007','0000')"><div class="dn">Энхтуяа Б.</div><div class="did">IET2023007 · 0000</div></div>
+          <div class="demo-btn" onclick="fillDemo('IET2022101','1111')"><div class="dn">Хосбаяр</div><div class="did">IET2022101 · 1111</div></div>
+          <div class="demo-btn" onclick="fillDemo('IET2022102','2222')"><div class="dn">Номунбал</div><div class="did">IET2022102 · 2222</div></div>
+          <div class="demo-btn" onclick="fillDemo('IET2022103','3333')"><div class="dn">Амарсанаа</div><div class="did">IET2022103 · 3333</div></div>
+          <div class="demo-btn" onclick="fillDemo('IET2022104','4444')"><div class="dn">Түвшинтөр</div><div class="did">IET2022104 · 4444</div></div>
+          <div class="demo-btn" onclick="fillDemo('IET2022105','5555')"><div class="dn">Хүрэлтулга</div><div class="did">IET2022105 · 5555</div></div>
+          <div class="demo-btn" onclick="fillDemo('IET2022106','6666')"><div class="dn">Хашбал</div><div class="did">IET2022106 · 6666</div></div>
+          <div class="demo-btn" onclick="fillDemo('IET2022107','7777')"><div class="dn">Болдбаатар</div><div class="did">IET2022107 · 7777</div></div>
+          <div class="demo-btn" onclick="fillDemo('IET2022108','8888')"><div class="dn">Тэмүүлэн</div><div class="did">IET2022108 · 8888</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════ DASHBOARD ═══════════ -->
+<div id="dashboard">
+  <div class="topbar">
+    <div class="tb-left">
+      <div class="tb-logo"><span>IET</span></div>
+      <div>
+        <div class="tb-title">IET Политехник Коллеж</div>
+        <div class="tb-sub">Оюутны Портал · 2024–2025</div>
+      </div>
+    </div>
+    <div class="tb-right">
+      <div class="user-chip">
+        <div class="user-av" id="tbAv">Б</div>
+        <span class="uname" id="tbName">Батжаргал Д.</span>
+      </div>
+      <button class="btn-out" onclick="doLogout()">⏻ Гарах</button>
+    </div>
+  </div>
+
+  <div class="main">
+
+    <!-- HERO -->
+    <div class="hero-banner">
+      <div class="hero-av" id="hAv">Б</div>
+      <div class="hero-info">
+        <h2 id="hName">Батжаргал Дорж</h2>
+        <div class="hid" id="hId">Оюутны ID: IET2021001</div>
+        <div class="hdept" id="hDept">Мэдээллийн технологи · 3-р курс</div>
+        <div class="hero-tags" id="hTags"></div>
+      </div>
+    </div>
+
+    <!-- STATS -->
+    <div class="stats-row">
+      <div class="stat-c">
+        <div class="stat-icon">🎓</div>
+        <div class="stat-v" id="sCred">94</div>
+        <div class="stat-l">Нийт кредит / 120</div>
+      </div>
+      <div class="stat-c">
+        <div class="stat-icon">⭐</div>
+        <div class="stat-v" id="sGpa">3.6</div>
+        <div class="stat-l">Дундаж GPA</div>
+      </div>
+      <div class="stat-c">
+        <div class="stat-icon">📅</div>
+        <div class="stat-v" id="sAtt">89%</div>
+        <div class="stat-l">Ирц (энэ улирал)</div>
+      </div>
+      <div class="stat-c">
+        <div class="stat-icon">📚</div>
+        <div class="stat-v" id="sSub">10</div>
+        <div class="stat-l">Хичээлийн тоо</div>
+      </div>
+    </div>
+
+    <!-- TABS -->
+    <div class="tab-bar">
+      <button class="tab-btn active" onclick="switchTab('grades',this)">📊 Дүн</button>
+      <button class="tab-btn" onclick="switchTab('schedule',this)">📅 Хуваарь</button>
+      <button class="tab-btn" onclick="switchTab('profile',this)">👤 Мэдээлэл</button>
+      <button class="tab-btn" onclick="switchTab('payment',this)">💰 Төлбөр</button>
+    </div>
+
+    <!-- GRADES PANE -->
+    <div class="tab-pane active" id="pane-grades">
+      <div class="sem-row">
+        <label>Улирал:</label>
+        <select id="semSel" onchange="renderGrades()">
+          <option value="0">2024–2025 · Намрын улирал</option>
+          <option value="1">2023–2024 · Хаврын улирал</option>
+          <option value="2">2022–2023 · Намрын улирал</option>
+        </select>
+        <div style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap;">
+          <button onclick="exportGradesExcel()" style="display:flex;align-items:center;gap:7px;padding:8px 16px;background:linear-gradient(135deg,rgba(0,180,120,0.15),rgba(0,229,160,0.08));border:1px solid rgba(0,180,120,0.35);border-radius:10px;color:#00e5a0;font-size:12px;font-weight:700;cursor:pointer;transition:all .2s;font-family:'Noto Sans',sans-serif;" onmouseover="this.style.background='linear-gradient(135deg,rgba(0,180,120,0.25),rgba(0,229,160,0.15))'" onmouseout="this.style.background='linear-gradient(135deg,rgba(0,180,120,0.15),rgba(0,229,160,0.08))'">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#00e5a0" stroke-width="2.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14,2 14,8 20,8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10,9 9,9 8,9"/></svg>
+            Excel татах
+          </button>
+          <button onclick="exportGradesCSV()" style="display:flex;align-items:center;gap:7px;padding:8px 16px;background:rgba(0,200,255,0.07);border:1px solid rgba(0,200,255,0.25);border-radius:10px;color:var(--cyan);font-size:12px;font-weight:700;cursor:pointer;transition:all .2s;font-family:'Noto Sans',sans-serif;" onmouseover="this.style.background='rgba(0,200,255,0.14)'" onmouseout="this.style.background='rgba(0,200,255,0.07)'">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7,10 12,15 17,10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            CSV татах
+          </button>
+        </div>
+      </div>
+      <div class="gtable-wrap">
+        <table>
+          <thead><tr>
+            <th>#</th><th>Хичээл</th><th>Тэнхим</th>
+            <th>Кредит</th><th>Оноо</th><th>Үнэлгээ</th><th>GPA</th>
+          </tr></thead>
+          <tbody id="gBody"></tbody>
+        </table>
+      </div>
+      <div class="gpa-summary" id="gpaSummary"></div>
+    </div>
+
+    <!-- SCHEDULE PANE -->
+    <div class="tab-pane" id="pane-schedule">
+      <div class="sched-grid" id="schedGrid"></div>
+    </div>
+
+    <!-- PROFILE PANE -->
+    <div class="tab-pane" id="pane-profile">
+      <div class="profile-card" id="profileCard"></div>
+    </div>
+
+    <!-- PAYMENT PANE -->
+    <div class="tab-pane" id="pane-payment">
+
+      <!-- Tuition status card -->
+      <div class="payment-card">
+        <h4>💰 Сургалтын төлбөр — 2024–2025 оны намрын улирал</h4>
+        <div class="tuition-info">
+          <div class="tuition-item">
+            <div class="tv">₮450,000</div>
+            <div class="tl">Нийт төлбөр</div>
+          </div>
+          <div class="tuition-item">
+            <div class="tv" style="color:var(--red);">₮450,000</div>
+            <div class="tl">Үлдэгдэл</div>
+          </div>
+          <div class="tuition-item">
+            <div class="tv" style="color:var(--green);">₮0</div>
+            <div class="tl">Төлсөн дүн</div>
+          </div>
+        </div>
+
+        <!-- QPay highlighted -->
+        <div style="font-size:12px;color:var(--cyan);font-weight:700;text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px;">⚡ Шуурхай төлбөр — QPay</div>
+        <button class="social-btn sb-qpay" onclick="dashboardPay('QPay')" style="width:100%;margin-bottom:16px;padding:14px 16px;">
+          <div class="sb-icon" style="width:36px;height:36px;font-size:20px;">💳</div>
+          <div class="sb-text" style="flex:1;">
+            <span class="sb-label" style="font-size:13px;">QPay — QR Кодоор төлөх</span>
+            <span class="sb-sub" style="font-size:11px;">Хаан банк, Төрийн банк, Голомт болон бусад банкны апп-аар</span>
+          </div>
+          <span style="color:var(--cyan);font-size:18px;">→</span>
+        </button>
+
+        <!-- Banks grid -->
+        <div style="font-size:12px;color:var(--cyan);font-weight:700;text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px;">🏦 Банкны шилжүүлгээр</div>
+        <div class="social-grid" style="grid-template-columns:1fr 1fr;gap:8px;margin-bottom:0;">
+          <button class="social-btn sb-khan" onclick="dashboardPay('Хаан банк')" style="padding:10px 12px;">
+            <div class="sb-icon">🏦</div>
+            <div class="sb-text"><span class="sb-label">Хаан банк</span><span class="sb-sub">Khan Bank OTP</span></div>
+          </button>
+          <button class="social-btn sb-state" onclick="dashboardPay('Төрийн банк')" style="padding:10px 12px;">
+            <div class="sb-icon">🏛️</div>
+            <div class="sb-text"><span class="sb-label">Төрийн банк</span><span class="sb-sub">State Bank OTP</span></div>
+          </button>
+          <button class="social-btn sb-golomt" onclick="bankNotImpl('Голомт банк')" style="padding:10px 12px;">
+            <div class="sb-icon">🏧</div>
+            <div class="sb-text"><span class="sb-label">Голомт банк</span><span class="sb-sub">Golomt Bank</span></div>
+          </button>
+          <button class="social-btn sb-tdb" onclick="bankNotImpl('TDB банк')" style="padding:10px 12px;">
+            <div class="sb-icon">💼</div>
+            <div class="sb-text"><span class="sb-label">TDB банк</span><span class="sb-sub">Trade Dev. Bank</span></div>
+          </button>
+        </div>
+      </div>
+
+      <!-- Pay history -->
+      <div class="payment-card">
+        <h4>📋 Төлбөрийн түүх</h4>
+        <div class="pay-history">
+          <div class="pay-hist-row">
+            <div class="ph-icon" style="background:rgba(0,180,120,0.15);">🏦</div>
+            <div class="ph-info">
+              <div class="ph-name">Хаан банк шилжүүлэг</div>
+              <div class="ph-date">2024-02-15 · 14:32 · Баталгаажсан ✓</div>
+            </div>
+            <div class="ph-amount" style="color:var(--green);">+₮450,000</div>
+          </div>
+          <div class="pay-hist-row">
+            <div class="ph-icon" style="background:rgba(0,150,255,0.15);">💳</div>
+            <div class="ph-info">
+              <div class="ph-name">QPay QR код</div>
+              <div class="ph-date">2023-09-08 · 10:14 · Баталгаажсан ✓</div>
+            </div>
+            <div class="ph-amount" style="color:var(--green);">+₮450,000</div>
+          </div>
+          <div class="pay-hist-row">
+            <div class="ph-icon" style="background:rgba(30,91,191,0.15);">🏛️</div>
+            <div class="ph-info">
+              <div class="ph-name">Төрийн банк шилжүүлэг</div>
+              <div class="ph-date">2023-02-20 · 09:55 · Баталгаажсан ✓</div>
+            </div>
+            <div class="ph-amount" style="color:var(--green);">+₮420,000</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /main -->
+</div><!-- /dashboard -->
+
+<script>
+/* ── PARTICLES ── */
+(function(){
+  const c = document.getElementById('particles');
+  for(let i=0;i<35;i++){
+    const p = document.createElement('div');
+    p.className='particle';
+    const sz = Math.random()*3+1;
+    p.style.cssText = `
+      width:${sz}px;height:${sz}px;
+      left:${Math.random()*100}%;
+      animation-duration:${Math.random()*12+8}s;
+      animation-delay:${Math.random()*10}s;
+      background:${Math.random()>.5?'#00c8ff':'#00eaff'};
+    `;
+    c.appendChild(p);
+  }
+})();
+
+/* ── SUBJECT ICONS ── */
+const SUBJECT_ICONS = {
+  'Веб хөгжүүлэлт':'🌐',
+  'APP хөгжүүлэлт':'📱',
+  'IoT (Юмсын интернет)':'🔌',
+  'Монгол хэл':'🇲🇳',
+  'Уран зохиол':'📖',
+  'Математик':'📐',
+  'Англи хэл':'🇬🇧',
+  '2D/3D Дижитал дизайн':'🎨',
+  'Хөдөлгөөнт эффект':'🎬',
+  'МТ-ийн интерфэйс':'🖥️',
+  'Соёл урлаг':'🎭',
+  'Мэдээллийн сан':'🗄️',
+  'Алгоритм':'⚙️',
+  'Объект хандлагат програмчлал':'💻',
+  'Сүлжээний технологи':'📡',
+  'C++ Програмчлал':'🔧',
+  'Дискрет математик':'🔢',
+  'Компьютерийн архитектур':'🏗️',
+  'Хиймэл оюун ухаан':'🤖',
+  'Системийн анализ':'📊',
+};
+
+/* ── DEPT COLORS ── */
+function deptColor(d){
+  if(d.includes('МТ')||d.includes('Мэдээлэл')) return {bg:'rgba(0,200,255,0.12)',c:'#00c8ff',b:'rgba(0,200,255,0.25)'};
+  if(d.includes('Дизайн')||d.includes('Хөдөл')||d.includes('Урлаг')) return {bg:'rgba(155,93,229,0.12)',c:'#9b5de5',b:'rgba(155,93,229,0.25)'};
+  if(d.includes('Хэл')||d.includes('Зохиол')||d.includes('Соёл')) return {bg:'rgba(0,229,160,0.12)',c:'#00e5a0',b:'rgba(0,229,160,0.25)'};
+  if(d.includes('Мат')||d.includes('Алгоритм')) return {bg:'rgba(245,166,35,0.12)',c:'#f5a623',b:'rgba(245,166,35,0.25)'};
+  return {bg:'rgba(0,200,255,0.07)',c:'#7a9abf',b:'rgba(0,200,255,0.15)'};
+}
+
+/* ── ACCOUNTS ── */
+const ACCOUNTS = {
+  'IET2021001': {
+    pw:'1234', name:'Батжаргал Дорж', short:'Батжаргал Д.', init:'Б',
+    color:'linear-gradient(135deg,#f5a623,#e8832a)',
+    dept:'Мэдээллийн технологи', course:'3-р курс', year:'2021',
+    credits:94, gpa:3.6, att:'89%',
+    tags:[{t:'2021 он',c:'#00c8ff'},{t:'Бакалавр',c:'#9b5de5'},{t:'Идэвхтэй',c:'#00e5a0'}],
+    phone:'+976 9900 0001', email:'batjargal@iet.edu.mn',
+    semesters:[
+      // Намрын 2024
+      [
+        {n:'APP хөгжүүлэлт',dept:'МТ-ийн тэнхим',cr:4,sc:91,g:'A',gp:4.0},
+        {n:'IoT (Юмсын интернет)',dept:'МТ-ийн тэнхим',cr:3,sc:88,g:'B',gp:3.5},
+        {n:'Веб хөгжүүлэлт',dept:'МТ-ийн тэнхим',cr:4,sc:94,g:'A',gp:4.0},
+        {n:'Мэдээллийн сан',dept:'МТ-ийн тэнхим',cr:3,sc:80,g:'B',gp:3.0},
+        {n:'2D/3D Дижитал дизайн',dept:'Дизайн тэнхим',cr:3,sc:87,g:'B',gp:3.5},
+        {n:'Хөдөлгөөнт эффект',dept:'Дизайн тэнхим',cr:3,sc:85,g:'B',gp:3.5},
+        {n:'МТ-ийн интерфэйс',dept:'МТ-ийн тэнхим',cr:2,sc:92,g:'A',gp:4.0},
+        {n:'Англи хэл',dept:'Хэлний тэнхим',cr:2,sc:78,g:'B',gp:3.0},
+        {n:'Монгол хэл',dept:'Хэлний тэнхим',cr:2,sc:90,g:'A',gp:4.0},
+        {n:'Математик',dept:'Математикийн тэнхим',cr:3,sc:83,g:'B',gp:3.5},
+      ],
+      // Хаврын 2024
+      [
+        {n:'Алгоритм',dept:'МТ-ийн тэнхим',cr:4,sc:90,g:'A',gp:4.0},
+        {n:'Объект хандлагат програмчлал',dept:'МТ-ийн тэнхим',cr:3,sc:85,g:'B',gp:3.5},
+        {n:'Сүлжээний технологи',dept:'МТ-ийн тэнхим',cr:3,sc:82,g:'B',gp:3.0},
+        {n:'Уран зохиол',dept:'Хэлний тэнхим',cr:2,sc:88,g:'B',gp:3.5},
+        {n:'Соёл урлаг',dept:'Урлагийн тэнхим',cr:2,sc:95,g:'A',gp:4.0},
+        {n:'Англи хэл',dept:'Хэлний тэнхим',cr:2,sc:76,g:'C',gp:2.5},
+      ],
+      // Намрын 2022
+      [
+        {n:'C++ Програмчлал',dept:'МТ-ийн тэнхим',cr:4,sc:86,g:'B',gp:3.5},
+        {n:'Дискрет математик',dept:'Математикийн тэнхим',cr:3,sc:71,g:'C',gp:2.5},
+        {n:'Монгол хэл',dept:'Хэлний тэнхим',cr:2,sc:93,g:'A',gp:4.0},
+        {n:'Хиймэл оюун ухаан',dept:'МТ-ийн тэнхим',cr:3,sc:90,g:'A',gp:4.0},
+      ],
+    ],
+  },
+
+  'IET2022015': {
+    pw:'5678', name:'Оюунцэцэг Тогтох', short:'Оюунцэцэг Т.', init:'О',
+    color:'linear-gradient(135deg,#9b5de5,#6a3fa0)',
+    dept:'Дизайн ба медиа технологи', course:'2-р курс', year:'2022',
+    credits:58, gpa:3.8, att:'92%',
+    tags:[{t:'2022 он',c:'#9b5de5'},{t:'Бакалавр',c:'#00c8ff'},{t:'Тэтгэлэгт',c:'#f5a623'}],
+    phone:'+976 9900 0015', email:'oyuuntsetseg@iet.edu.mn',
+    semesters:[
+      [
+        {n:'2D/3D Дижитал дизайн',dept:'Дизайн тэнхим',cr:4,sc:97,g:'A',gp:4.0},
+        {n:'Хөдөлгөөнт эффект',dept:'Дизайн тэнхим',cr:4,sc:95,g:'A',gp:4.0},
+        {n:'МТ-ийн интерфэйс',dept:'МТ-ийн тэнхим',cr:3,sc:92,g:'A',gp:4.0},
+        {n:'APP хөгжүүлэлт',dept:'МТ-ийн тэнхим',cr:3,sc:84,g:'B',gp:3.5},
+        {n:'Соёл урлаг',dept:'Урлагийн тэнхим',cr:2,sc:98,g:'A',gp:4.0},
+        {n:'Англи хэл',dept:'Хэлний тэнхим',cr:2,sc:82,g:'B',gp:3.0},
+        {n:'Монгол хэл',dept:'Хэлний тэнхим',cr:2,sc:88,g:'B',gp:3.5},
+        {n:'Математик',dept:'Математикийн тэнхим',cr:2,sc:79,g:'B',gp:3.0},
+      ],
+      [
+        {n:'2D/3D Дижитал дизайн',dept:'Дизайн тэнхим',cr:4,sc:96,g:'A',gp:4.0},
+        {n:'Уран зохиол',dept:'Хэлний тэнхим',cr:2,sc:91,g:'A',gp:4.0},
+        {n:'Мэдээллийн сан',dept:'МТ-ийн тэнхим',cr:3,sc:77,g:'C',gp:2.5},
+        {n:'Математик',dept:'Математикийн тэнхим',cr:2,sc:80,g:'B',gp:3.0},
+      ],
+      [
+        {n:'Компьютерийн архитектур',dept:'МТ-ийн тэнхим',cr:3,sc:85,g:'B',gp:3.5},
+        {n:'Монгол хэл',dept:'Хэлний тэнхим',cr:2,sc:94,g:'A',gp:4.0},
+      ],
+    ],
+  },
+
+  'IET2020033': {
+    pw:'9999', name:'Мөнхбаяр Гантулга', short:'Мөнхбаяр Г.', init:'М',
+    color:'linear-gradient(135deg,#00e5a0,#009966)',
+    dept:'Мэдээллийн технологи', course:'4-р курс', year:'2020',
+    credits:118, gpa:3.4, att:'85%',
+    tags:[{t:'2020 он',c:'#00e5a0'},{t:'Бакалавр',c:'#00c8ff'},{t:'Дипломын ажил',c:'#ff4d6d'}],
+    phone:'+976 9900 0033', email:'munkhbayar@iet.edu.mn',
+    semesters:[
+      [
+        {n:'IoT (Юмсын интернет)',dept:'МТ-ийн тэнхим',cr:4,sc:92,g:'A',gp:4.0},
+        {n:'APP хөгжүүлэлт',dept:'МТ-ийн тэнхим',cr:4,sc:89,g:'B',gp:3.5},
+        {n:'Хиймэл оюун ухаан',dept:'МТ-ийн тэнхим',cr:3,sc:86,g:'B',gp:3.5},
+        {n:'МТ-ийн интерфэйс',dept:'МТ-ийн тэнхим',cr:2,sc:90,g:'A',gp:4.0},
+        {n:'Англи хэл',dept:'Хэлний тэнхим',cr:2,sc:72,g:'C',gp:2.5},
+        {n:'Соёл урлаг',dept:'Урлагийн тэнхим',cr:2,sc:88,g:'B',gp:3.5},
+      ],
+      [
+        {n:'Сүлжээний технологи',dept:'МТ-ийн тэнхим',cr:3,sc:83,g:'B',gp:3.0},
+        {n:'Мэдээллийн сан',dept:'МТ-ийн тэнхим',cr:3,sc:80,g:'B',gp:3.0},
+        {n:'2D/3D Дижитал дизайн',dept:'Дизайн тэнхим',cr:3,sc:77,g:'C',gp:2.5},
+        {n:'Математик',dept:'Математикийн тэнхим',cr:3,sc:70,g:'C',gp:2.5},
+        {n:'Монгол хэл',dept:'Хэлний тэнхим',cr:2,sc:91,g:'A',gp:4.0},
+      ],
+      [
+        {n:'C++ Програмчлал',dept:'МТ-ийн тэнхим',cr:4,sc:88,g:'B',gp:3.5},
+        {n:'Уран зохиол',dept:'Хэлний тэнхим',cr:2,sc:82,g:'B',gp:3.0},
+        {n:'Хөдөлгөөнт эффект',dept:'Дизайн тэнхим',cr:3,sc:74,g:'C',gp:2.5},
+      ],
+    ],
+  },
+
+  'IET2023007': {
+    pw:'0000', name:'Энхтуяа Батбаяр', short:'Энхтуяа Б.', init:'Э',
+    color:'linear-gradient(135deg,#00c8ff,#0066cc)',
+    dept:'Програм хангамж', course:'1-р курс', year:'2023',
+    credits:28, gpa:3.7, att:'94%',
+    tags:[{t:'2023 он',c:'#00c8ff'},{t:'Бакалавр',c:'#9b5de5'},{t:'Шинэ оюутан',c:'#00e5a0'}],
+    phone:'+976 9900 0007', email:'enkhtuyaa@iet.edu.mn',
+    semesters:[
+      [
+        {n:'APP хөгжүүлэлт',dept:'МТ-ийн тэнхим',cr:3,sc:89,g:'B',gp:3.5},
+        {n:'Монгол хэл',dept:'Хэлний тэнхим',cr:2,sc:95,g:'A',gp:4.0},
+        {n:'Уран зохиол',dept:'Хэлний тэнхим',cr:2,sc:92,g:'A',gp:4.0},
+        {n:'Математик',dept:'Математикийн тэнхим',cr:3,sc:88,g:'B',gp:3.5},
+        {n:'Англи хэл',dept:'Хэлний тэнхим',cr:2,sc:85,g:'B',gp:3.5},
+        {n:'МТ-ийн интерфэйс',dept:'МТ-ийн тэнхим',cr:2,sc:91,g:'A',gp:4.0},
+        {n:'Соёл урлаг',dept:'Урлагийн тэнхим',cr:2,sc:96,g:'A',gp:4.0},
+      ],
+      [
+        {n:'Мэдээллийн сан',dept:'МТ-ийн тэнхим',cr:3,sc:84,g:'B',gp:3.5},
+        {n:'Математик',dept:'Математикийн тэнхим',cr:3,sc:86,g:'B',gp:3.5},
+        {n:'Англи хэл',dept:'Хэлний тэнхим',cr:2,sc:90,g:'A',gp:4.0},
+      ],
+      [
+        {n:'C++ Програмчлал',dept:'МТ-ийн тэнхим',cr:3,sc:82,g:'B',gp:3.0},
+        {n:'Дискрет математик',dept:'Математикийн тэнхим',cr:2,sc:78,g:'B',gp:3.0},
+      ],
+    ],
+  },
+
+  'IET2022101': {
+    pw:'1111', name:'Хосбаяр Лхагвасүрэн', short:'Хосбаяр Л.', init:'Х',
+    color:'linear-gradient(135deg,#ff6b6b,#cc2222)',
+    dept:'Мэдээллийн технологи', course:'3-р курс', year:'2022',
+    credits:86, gpa:3.5, att:'87%',
+    tags:[{t:'2022 он',c:'#ff6b6b'},{t:'Бакалавр',c:'#00c8ff'},{t:'Идэвхтэй',c:'#00e5a0'}],
+    phone:'+976 9911 0101', email:'khosbayar@iet.edu.mn',
+    semesters:[
+      [
+        {n:'APP хөгжүүлэлт',dept:'МТ-ийн тэнхим',cr:4,sc:88,g:'B',gp:3.5},
+        {n:'IoT (Юмсын интернет)',dept:'МТ-ийн тэнхим',cr:3,sc:92,g:'A',gp:4.0},
+        {n:'Монгол хэл',dept:'Хэлний тэнхим',cr:2,sc:86,g:'B',gp:3.5},
+        {n:'Уран зохиол',dept:'Хэлний тэнхим',cr:2,sc:80,g:'B',gp:3.0},
+        {n:'Математик',dept:'Математикийн тэнхим',cr:3,sc:78,g:'B',gp:3.0},
+        {n:'Англи хэл',dept:'Хэлний тэнхим',cr:2,sc:74,g:'C',gp:2.5},
+        {n:'2D/3D Дижитал дизайн',dept:'Дизайн тэнхим',cr:3,sc:90,g:'A',gp:4.0},
+        {n:'МТ-ийн интерфэйс',dept:'МТ-ийн тэнхим',cr:2,sc:87,g:'B',gp:3.5},
+        {n:'Соёл урлаг',dept:'Урлагийн тэнхим',cr:2,sc:83,g:'B',gp:3.0},
+        {n:'Хөдөлгөөнт эффект',dept:'Дизайн тэнхим',cr:3,sc:91,g:'A',gp:4.0},
+      ],
+      [
+        {n:'Веб хөгжүүлэлт',dept:'МТ-ийн тэнхим',cr:4,sc:85,g:'B',gp:3.5},
+        {n:'Алгоритм',dept:'МТ-ийн тэнхим',cr:3,sc:82,g:'B',gp:3.0},
+        {n:'Монгол хэл',dept:'Хэлний тэнхим',cr:2,sc:90,g:'A',gp:4.0},
+        {n:'Англи хэл',dept:'Хэлний тэнхим',cr:2,sc:76,g:'C',gp:2.5},
+      ],
+      [
+        {n:'C++ Програмчлал',dept:'МТ-ийн тэнхим',cr:4,sc:84,g:'B',gp:3.5},
+        {n:'Математик',dept:'Математикийн тэнхим',cr:3,sc:79,g:'B',gp:3.0},
+      ],
+    ],
+  },
+
+  'IET2022102': {
+    pw:'2222', name:'Номунбал Дамдинсүрэн', short:'Номунбал Д.', init:'Н',
+    color:'linear-gradient(135deg,#f7971e,#ffd200)',
+    dept:'Дизайн ба медиа технологи', course:'3-р курс', year:'2022',
+    credits:88, gpa:3.8, att:'91%',
+    tags:[{t:'2022 он',c:'#f7971e'},{t:'Бакалавр',c:'#9b5de5'},{t:'Тэтгэлэгт',c:'#00e5a0'}],
+    phone:'+976 9911 0102', email:'nomunbal@iet.edu.mn',
+    semesters:[
+      [
+        {n:'2D/3D Дижитал дизайн',dept:'Дизайн тэнхим',cr:4,sc:96,g:'A',gp:4.0},
+        {n:'Хөдөлгөөнт эффект',dept:'Дизайн тэнхим',cr:4,sc:94,g:'A',gp:4.0},
+        {n:'МТ-ийн интерфэйс',dept:'МТ-ийн тэнхим',cr:3,sc:90,g:'A',gp:4.0},
+        {n:'Монгол хэл',dept:'Хэлний тэнхим',cr:2,sc:88,g:'B',gp:3.5},
+        {n:'Уран зохиол',dept:'Хэлний тэнхим',cr:2,sc:92,g:'A',gp:4.0},
+        {n:'Англи хэл',dept:'Хэлний тэнхим',cr:2,sc:80,g:'B',gp:3.0},
+        {n:'Соёл урлаг',dept:'Урлагийн тэнхим',cr:2,sc:97,g:'A',gp:4.0},
+        {n:'Математик',dept:'Математикийн тэнхим',cr:3,sc:75,g:'C',gp:2.5},
+        {n:'APP хөгжүүлэлт',dept:'МТ-ийн тэнхим',cr:3,sc:83,g:'B',gp:3.5},
+        {n:'IoT (Юмсын интернет)',dept:'МТ-ийн тэнхим',cr:3,sc:86,g:'B',gp:3.5},
+      ],
+      [
+        {n:'2D/3D Дижитал дизайн',dept:'Дизайн тэнхим',cr:4,sc:95,g:'A',gp:4.0},
+        {n:'Хөдөлгөөнт эффект',dept:'Дизайн тэнхим',cr:4,sc:93,g:'A',gp:4.0},
+        {n:'Монгол хэл',dept:'Хэлний тэнхим',cr:2,sc:89,g:'B',gp:3.5},
+        {n:'Математик',dept:'Математикийн тэнхим',cr:3,sc:72,g:'C',gp:2.5},
+      ],
+      [
+        {n:'Хөдөлгөөнт эффект',dept:'Дизайн тэнхим',cr:3,sc:91,g:'A',gp:4.0},
+        {n:'Уран зохиол',dept:'Хэлний тэнхим',cr:2,sc:90,g:'A',gp:4.0},
+      ],
+    ],
+  },
+
+  'IET2022103': {
+    pw:'3333', name:'Амарсанаа Жаргалсайхан', short:'Амарсанаа Ж.', init:'А',
+    color:'linear-gradient(135deg,#11998e,#38ef7d)',
+    dept:'Програм хангамж', course:'3-р курс', year:'2022',
+    credits:90, gpa:3.6, att:'88%',
+    tags:[{t:'2022 он',c:'#38ef7d'},{t:'Бакалавр',c:'#00c8ff'},{t:'Идэвхтэй',c:'#f5a623'}],
+    phone:'+976 9911 0103', email:'amarsanaa@iet.edu.mn',
+    semesters:[
+      [
+        {n:'APP хөгжүүлэлт',dept:'МТ-ийн тэнхим',cr:4,sc:91,g:'A',gp:4.0},
+        {n:'Веб хөгжүүлэлт',dept:'МТ-ийн тэнхим',cr:4,sc:89,g:'B',gp:3.5},
+        {n:'IoT (Юмсын интернет)',dept:'МТ-ийн тэнхим',cr:3,sc:85,g:'B',gp:3.5},
+        {n:'Монгол хэл',dept:'Хэлний тэнхим',cr:2,sc:93,g:'A',gp:4.0},
+        {n:'Уран зохиол',dept:'Хэлний тэнхим',cr:2,sc:87,g:'B',gp:3.5},
+        {n:'Математик',dept:'Математикийн тэнхим',cr:3,sc:82,g:'B',gp:3.0},
+        {n:'Англи хэл',dept:'Хэлний тэнхим',cr:2,sc:79,g:'B',gp:3.0},
+        {n:'МТ-ийн интерфэйс',dept:'МТ-ийн тэнхим',cr:2,sc:90,g:'A',gp:4.0},
+        {n:'Соёл урлаг',dept:'Урлагийн тэнхим',cr:2,sc:85,g:'B',gp:3.5},
+        {n:'2D/3D Дижитал дизайн',dept:'Дизайн тэнхим',cr:3,sc:88,g:'B',gp:3.5},
+      ],
+      [
+        {n:'Алгоритм',dept:'МТ-ийн тэнхим',cr:4,sc:87,g:'B',gp:3.5},
+        {n:'Монгол хэл',dept:'Хэлний тэнхим',cr:2,sc:94,g:'A',gp:4.0},
+        {n:'Хөдөлгөөнт эффект',dept:'Дизайн тэнхим',cr:3,sc:83,g:'B',gp:3.0},
+      ],
+      [
+        {n:'C++ Програмчлал',dept:'МТ-ийн тэнхим',cr:3,sc:85,g:'B',gp:3.5},
+        {n:'Англи хэл',dept:'Хэлний тэнхим',cr:2,sc:80,g:'B',gp:3.0},
+      ],
+    ],
+  },
+
+  'IET2022104': {
+    pw:'4444', name:'Түвшинтөр Батсүрэн', short:'Түвшинтөр Б.', init:'Т',
+    color:'linear-gradient(135deg,#8e2de2,#4a00e0)',
+    dept:'Мэдээллийн технологи', course:'3-р курс', year:'2022',
+    credits:84, gpa:3.4, att:'86%',
+    tags:[{t:'2022 он',c:'#8e2de2'},{t:'Бакалавр',c:'#00c8ff'},{t:'Идэвхтэй',c:'#00e5a0'}],
+    phone:'+976 9911 0104', email:'tuvshintugr@iet.edu.mn',
+    semesters:[
+      [
+        {n:'APP хөгжүүлэлт',dept:'МТ-ийн тэнхим',cr:4,sc:84,g:'B',gp:3.5},
+        {n:'IoT (Юмсын интернет)',dept:'МТ-ийн тэнхим',cr:3,sc:87,g:'B',gp:3.5},
+        {n:'Монгол хэл',dept:'Хэлний тэнхим',cr:2,sc:91,g:'A',gp:4.0},
+        {n:'Уран зохиол',dept:'Хэлний тэнхим',cr:2,sc:88,g:'B',gp:3.5},
+        {n:'Математик',dept:'Математикийн тэнхим',cr:3,sc:76,g:'C',gp:2.5},
+        {n:'Англи хэл',dept:'Хэлний тэнхим',cr:2,sc:72,g:'C',gp:2.5},
+        {n:'МТ-ийн интерфэйс',dept:'МТ-ийн тэнхим',cr:2,sc:89,g:'B',gp:3.5},
+        {n:'Соёл урлаг',dept:'Урлагийн тэнхим',cr:2,sc:90,g:'A',gp:4.0},
+        {n:'2D/3D Дижитал дизайн',dept:'Дизайн тэнхим',cr:3,sc:83,g:'B',gp:3.0},
+        {n:'Хөдөлгөөнт эффект',dept:'Дизайн тэнхим',cr:3,sc:81,g:'B',gp:3.0},
+      ],
+      [
+        {n:'Веб хөгжүүлэлт',dept:'МТ-ийн тэнхим',cr:4,sc:82,g:'B',gp:3.0},
+        {n:'Монгол хэл',dept:'Хэлний тэнхим',cr:2,sc:92,g:'A',gp:4.0},
+        {n:'Математик',dept:'Математикийн тэнхим',cr:3,sc:74,g:'C',gp:2.5},
+      ],
+      [
+        {n:'C++ Програмчлал',dept:'МТ-ийн тэнхим',cr:3,sc:83,g:'B',gp:3.0},
+        {n:'Англи хэл',dept:'Хэлний тэнхим',cr:2,sc:77,g:'C',gp:2.5},
+      ],
+    ],
+  },
+
+  'IET2022105': {
+    pw:'5555', name:'Хүрэлтулга Энхболд', short:'Хүрэлтулга Э.', init:'Х',
+    color:'linear-gradient(135deg,#f953c6,#b91d73)',
+    dept:'Дизайн ба медиа технологи', course:'3-р курс', year:'2022',
+    credits:89, gpa:3.7, att:'90%',
+    tags:[{t:'2022 он',c:'#f953c6'},{t:'Бакалавр',c:'#9b5de5'},{t:'Тэтгэлэгт',c:'#f5a623'}],
+    phone:'+976 9911 0105', email:'khureltulga@iet.edu.mn',
+    semesters:[
+      [
+        {n:'2D/3D Дижитал дизайн',dept:'Дизайн тэнхим',cr:4,sc:95,g:'A',gp:4.0},
+        {n:'Хөдөлгөөнт эффект',dept:'Дизайн тэнхим',cr:4,sc:92,g:'A',gp:4.0},
+        {n:'МТ-ийн интерфэйс',dept:'МТ-ийн тэнхим',cr:3,sc:88,g:'B',gp:3.5},
+        {n:'APP хөгжүүлэлт',dept:'МТ-ийн тэнхим',cr:3,sc:84,g:'B',gp:3.5},
+        {n:'Монгол хэл',dept:'Хэлний тэнхим',cr:2,sc:90,g:'A',gp:4.0},
+        {n:'Уран зохиол',dept:'Хэлний тэнхим',cr:2,sc:87,g:'B',gp:3.5},
+        {n:'Англи хэл',dept:'Хэлний тэнхим',cr:2,sc:81,g:'B',gp:3.0},
+        {n:'Математик',dept:'Математикийн тэнхим',cr:3,sc:77,g:'C',gp:2.5},
+        {n:'Соёл урлаг',dept:'Урлагийн тэнхим',cr:2,sc:96,g:'A',gp:4.0},
+        {n:'IoT (Юмсын интернет)',dept:'МТ-ийн тэнхим',cr:3,sc:85,g:'B',gp:3.5},
+      ],
+      [
+        {n:'2D/3D Дижитал дизайн',dept:'Дизайн тэнхим',cr:4,sc:93,g:'A',gp:4.0},
+        {n:'Монгол хэл',dept:'Хэлний тэнхим',cr:2,sc:91,g:'A',gp:4.0},
+        {n:'Математик',dept:'Математикийн тэнхим',cr:3,sc:73,g:'C',gp:2.5},
+      ],
+      [
+        {n:'Хөдөлгөөнт эффект',dept:'Дизайн тэнхим',cr:4,sc:90,g:'A',gp:4.0},
+        {n:'Англи хэл',dept:'Хэлний тэнхим',cr:2,sc:82,g:'B',gp:3.0},
+      ],
+    ],
+  },
+
+  'IET2022106': {
+    pw:'6666', name:'Хашбал Гантөгс', short:'Хашбал Г.', init:'Х',
+    color:'linear-gradient(135deg,#1a1a2e,#16213e,#0f3460)',
+    dept:'Мэдээллийн технологи', course:'3-р курс', year:'2022',
+    credits:83, gpa:3.3, att:'84%',
+    tags:[{t:'2022 он',c:'#00c8ff'},{t:'Бакалавр',c:'#9b5de5'},{t:'Идэвхтэй',c:'#00e5a0'}],
+    phone:'+976 9911 0106', email:'khashbal@iet.edu.mn',
+    semesters:[
+      [
+        {n:'APP хөгжүүлэлт',dept:'МТ-ийн тэнхим',cr:4,sc:82,g:'B',gp:3.0},
+        {n:'IoT (Юмсын интернет)',dept:'МТ-ийн тэнхим',cr:3,sc:80,g:'B',gp:3.0},
+        {n:'Монгол хэл',dept:'Хэлний тэнхим',cr:2,sc:88,g:'B',gp:3.5},
+        {n:'Уран зохиол',dept:'Хэлний тэнхим',cr:2,sc:85,g:'B',gp:3.5},
+        {n:'Математик',dept:'Математикийн тэнхим',cr:3,sc:73,g:'C',gp:2.5},
+        {n:'Англи хэл',dept:'Хэлний тэнхим',cr:2,sc:70,g:'C',gp:2.5},
+        {n:'МТ-ийн интерфэйс',dept:'МТ-ийн тэнхим',cr:2,sc:86,g:'B',gp:3.5},
+        {n:'Соёл урлаг',dept:'Урлагийн тэнхим',cr:2,sc:89,g:'B',gp:3.5},
+        {n:'2D/3D Дижитал дизайн',dept:'Дизайн тэнхим',cr:3,sc:84,g:'B',gp:3.5},
+        {n:'Хөдөлгөөнт эффект',dept:'Дизайн тэнхим',cr:3,sc:79,g:'B',gp:3.0},
+      ],
+      [
+        {n:'Веб хөгжүүлэлт',dept:'МТ-ийн тэнхим',cr:4,sc:80,g:'B',gp:3.0},
+        {n:'Алгоритм',dept:'МТ-ийн тэнхим',cr:3,sc:78,g:'B',gp:3.0},
+        {n:'Монгол хэл',dept:'Хэлний тэнхим',cr:2,sc:90,g:'A',gp:4.0},
+      ],
+      [
+        {n:'C++ Програмчлал',dept:'МТ-ийн тэнхим',cr:3,sc:82,g:'B',gp:3.0},
+        {n:'Математик',dept:'Математикийн тэнхим',cr:3,sc:70,g:'C',gp:2.5},
+      ],
+    ],
+  },
+
+  'IET2022107': {
+    pw:'7777', name:'Болдбаатар Дашдорж', short:'Болдбаатар Д.', init:'Б',
+    color:'linear-gradient(135deg,#134e5e,#71b280)',
+    dept:'Програм хангамж', course:'3-р курс', year:'2022',
+    credits:87, gpa:3.5, att:'89%',
+    tags:[{t:'2022 он',c:'#71b280'},{t:'Бакалавр',c:'#00c8ff'},{t:'Идэвхтэй',c:'#f5a623'}],
+    phone:'+976 9911 0107', email:'boldbaatar@iet.edu.mn',
+    semesters:[
+      [
+        {n:'APP хөгжүүлэлт',dept:'МТ-ийн тэнхим',cr:4,sc:87,g:'B',gp:3.5},
+        {n:'Веб хөгжүүлэлт',dept:'МТ-ийн тэнхим',cr:4,sc:89,g:'B',gp:3.5},
+        {n:'IoT (Юмсын интернет)',dept:'МТ-ийн тэнхим',cr:3,sc:90,g:'A',gp:4.0},
+        {n:'Монгол хэл',dept:'Хэлний тэнхим',cr:2,sc:87,g:'B',gp:3.5},
+        {n:'Уран зохиол',dept:'Хэлний тэнхим',cr:2,sc:84,g:'B',gp:3.5},
+        {n:'Математик',dept:'Математикийн тэнхим',cr:3,sc:80,g:'B',gp:3.0},
+        {n:'Англи хэл',dept:'Хэлний тэнхим',cr:2,sc:78,g:'B',gp:3.0},
+        {n:'МТ-ийн интерфэйс',dept:'МТ-ийн тэнхим',cr:2,sc:91,g:'A',gp:4.0},
+        {n:'Соёл урлаг',dept:'Урлагийн тэнхим',cr:2,sc:83,g:'B',gp:3.0},
+        {n:'2D/3D Дижитал дизайн',dept:'Дизайн тэнхим',cr:3,sc:85,g:'B',gp:3.5},
+      ],
+      [
+        {n:'Алгоритм',dept:'МТ-ийн тэнхим',cr:4,sc:86,g:'B',gp:3.5},
+        {n:'Монгол хэл',dept:'Хэлний тэнхим',cr:2,sc:90,g:'A',gp:4.0},
+        {n:'Хөдөлгөөнт эффект',dept:'Дизайн тэнхим',cr:3,sc:82,g:'B',gp:3.0},
+      ],
+      [
+        {n:'C++ Програмчлал',dept:'МТ-ийн тэнхим',cr:3,sc:84,g:'B',gp:3.5},
+        {n:'Математик',dept:'Математикийн тэнхим',cr:3,sc:77,g:'C',gp:2.5},
+      ],
+    ],
+  },
+
+  'IET2022108': {
+    pw:'8888', name:'Тэмүүлэн Мөнхөө', short:'Тэмүүлэн М.', init:'Т',
+    color:'linear-gradient(135deg,#f7b733,#fc4a1a)',
+    dept:'Мэдээллийн технологи', course:'3-р курс', year:'2022',
+    credits:91, gpa:3.9, att:'93%',
+    tags:[{t:'2022 он',c:'#f7b733'},{t:'Бакалавр',c:'#9b5de5'},{t:'Шилдэг оюутан',c:'#00e5a0'}],
+    phone:'+976 9911 0108', email:'temuulen@iet.edu.mn',
+    semesters:[
+      [
+        {n:'APP хөгжүүлэлт',dept:'МТ-ийн тэнхим',cr:4,sc:95,g:'A',gp:4.0},
+        {n:'IoT (Юмсын интернет)',dept:'МТ-ийн тэнхим',cr:3,sc:93,g:'A',gp:4.0},
+        {n:'Веб хөгжүүлэлт',dept:'МТ-ийн тэнхим',cr:4,sc:91,g:'A',gp:4.0},
+        {n:'Монгол хэл',dept:'Хэлний тэнхим',cr:2,sc:96,g:'A',gp:4.0},
+        {n:'Уран зохиол',dept:'Хэлний тэнхим',cr:2,sc:90,g:'A',gp:4.0},
+        {n:'Математик',dept:'Математикийн тэнхим',cr:3,sc:88,g:'B',gp:3.5},
+        {n:'Англи хэл',dept:'Хэлний тэнхим',cr:2,sc:85,g:'B',gp:3.5},
+        {n:'МТ-ийн интерфэйс',dept:'МТ-ийн тэнхим',cr:2,sc:94,g:'A',gp:4.0},
+        {n:'Соёл урлаг',dept:'Урлагийн тэнхим',cr:2,sc:92,g:'A',gp:4.0},
+        {n:'2D/3D Дижитал дизайн',dept:'Дизайн тэнхим',cr:3,sc:90,g:'A',gp:4.0},
+      ],
+      [
+        {n:'Алгоритм',dept:'МТ-ийн тэнхим',cr:4,sc:92,g:'A',gp:4.0},
+        {n:'Хөдөлгөөнт эффект',dept:'Дизайн тэнхим',cr:3,sc:89,g:'B',gp:3.5},
+        {n:'Монгол хэл',dept:'Хэлний тэнхим',cr:2,sc:95,g:'A',gp:4.0},
+        {n:'Математик',dept:'Математикийн тэнхим',cr:3,sc:84,g:'B',gp:3.5},
+      ],
+      [
+        {n:'C++ Програмчлал',dept:'МТ-ийн тэнхим',cr:3,sc:90,g:'A',gp:4.0},
+        {n:'Англи хэл',dept:'Хэлний тэнхим',cr:2,sc:86,g:'B',gp:3.5},
+      ],
+    ],
+  },
+};
+
+/* SCHEDULE DATA */
+const SCHEDULES = {
+  'IET2021001': [
+    {d:'Даваа', cls:[
+      {t:'08:00–09:30',n:'APP хөгжүүлэлт',r:'Lab-4'},
+      {t:'10:00–11:30',n:'IoT (Юмсын интернет)',r:'Lab-2'},
+      {t:'13:00–14:30',n:'Математик',r:'B101'},
+    ]},
+    {d:'Мягмар', cls:[
+      {t:'08:00–09:30',n:'Веб хөгжүүлэлт',r:'Lab-3'},
+      {t:'11:00–12:30',n:'Монгол хэл',r:'A205'},
+    ]},
+    {d:'Лхагва', cls:[
+      {t:'09:00–10:30',n:'2D/3D Дижитал дизайн',r:'Design Lab'},
+      {t:'13:00–14:30',n:'МТ-ийн интерфэйс',r:'Lab-1'},
+      {t:'15:00–16:30',n:'Хөдөлгөөнт эффект',r:'Design Lab'},
+    ]},
+    {d:'Пүрэв', cls:[
+      {t:'08:00–09:30',n:'Мэдээллийн сан',r:'Lab-2'},
+      {t:'10:00–11:30',n:'Англи хэл',r:'A103'},
+    ]},
+    {d:'Баасан', cls:[
+      {t:'09:00–10:30',n:'APP хөгжүүлэлт',r:'Lab-4'},
+      {t:'11:00–12:30',n:'IoT (Юмсын интернет)',r:'Lab-2'},
+    ]},
+  ],
+  'IET2022015': [
+    {d:'Даваа', cls:[
+      {t:'08:00–09:30',n:'2D/3D Дижитал дизайн',r:'Design Lab'},
+      {t:'11:00–12:30',n:'Монгол хэл',r:'A201'},
+    ]},
+    {d:'Мягмар', cls:[
+      {t:'09:00–10:30',n:'Хөдөлгөөнт эффект',r:'Design Lab'},
+      {t:'13:00–14:30',n:'APP хөгжүүлэлт',r:'Lab-3'},
+    ]},
+    {d:'Лхагва', cls:[
+      {t:'08:00–09:30',n:'МТ-ийн интерфэйс',r:'Lab-1'},
+      {t:'10:00–11:30',n:'Соёл урлаг',r:'Art Room'},
+      {t:'14:00–15:30',n:'Англи хэл',r:'A105'},
+    ]},
+    {d:'Пүрэв', cls:[
+      {t:'09:00–10:30',n:'2D/3D Дижитал дизайн',r:'Design Lab'},
+      {t:'11:00–12:30',n:'Математик',r:'B102'},
+    ]},
+    {d:'Баасан', cls:[
+      {t:'09:00–10:30',n:'Хөдөлгөөнт эффект',r:'Design Lab'},
+      {t:'13:00–14:30',n:'Соёл урлаг',r:'Art Room'},
+    ]},
+  ],
+  'IET2020033': [
+    {d:'Даваа', cls:[
+      {t:'08:00–09:30',n:'IoT (Юмсын интернет)',r:'Lab-2'},
+      {t:'10:00–11:30',n:'APP хөгжүүлэлт',r:'Lab-4'},
+    ]},
+    {d:'Мягмар', cls:[
+      {t:'09:00–10:30',n:'Хиймэл оюун ухаан',r:'Lab-5'},
+      {t:'13:00–14:30',n:'МТ-ийн интерфэйс',r:'Lab-1'},
+    ]},
+    {d:'Лхагва', cls:[
+      {t:'08:00–09:30',n:'IoT (Юмсын интернет)',r:'Lab-2'},
+      {t:'11:00–12:30',n:'Англи хэл',r:'A103'},
+      {t:'14:00–15:30',n:'Соёл урлаг',r:'Art Room'},
+    ]},
+    {d:'Пүрэв', cls:[
+      {t:'09:00–10:30',n:'APP хөгжүүлэлт',r:'Lab-4'},
+      {t:'11:00–12:30',n:'Хиймэл оюун ухаан',r:'Lab-5'},
+    ]},
+    {d:'Баасан', cls:[
+      {t:'09:00–10:30',n:'МТ-ийн интерфэйс',r:'Lab-1'},
+    ]},
+  ],
+  'IET2023007': [
+    {d:'Даваа', cls:[{t:'08:00–09:30',n:'APP хөгжүүлэлт',r:'Lab-3'},{t:'10:00–11:30',n:'Математик',r:'B101'},{t:'13:00–14:30',n:'Монгол хэл',r:'A201'}]},
+    {d:'Мягмар', cls:[{t:'09:00–10:30',n:'Уран зохиол',r:'A203'},{t:'11:00–12:30',n:'МТ-ийн интерфэйс',r:'Lab-1'}]},
+    {d:'Лхагва', cls:[{t:'08:00–09:30',n:'Математик',r:'B101'},{t:'10:00–11:30',n:'Англи хэл',r:'A103'},{t:'14:00–15:30',n:'Соёл урлаг',r:'Art Room'}]},
+    {d:'Пүрэв', cls:[{t:'09:00–10:30',n:'APP хөгжүүлэлт',r:'Lab-3'},{t:'11:00–12:30',n:'Монгол хэл',r:'A201'}]},
+    {d:'Баасан', cls:[{t:'09:00–10:30',n:'Уран зохиол',r:'A203'},{t:'11:00–12:30',n:'Соёл урлаг',r:'Art Room'},{t:'13:00–14:30',n:'Англи хэл',r:'A103'}]},
+  ],
+  'IET2022101': [
+    {d:'Даваа', cls:[{t:'08:00–09:30',n:'APP хөгжүүлэлт',r:'Lab-4'},{t:'10:00–11:30',n:'IoT (Юмсын интернет)',r:'Lab-2'},{t:'13:00–14:30',n:'Математик',r:'B103'}]},
+    {d:'Мягмар', cls:[{t:'09:00–10:30',n:'2D/3D Дижитал дизайн',r:'Design Lab'},{t:'11:00–12:30',n:'Монгол хэл',r:'A204'}]},
+    {d:'Лхагва', cls:[{t:'08:00–09:30',n:'МТ-ийн интерфэйс',r:'Lab-1'},{t:'13:00–14:30',n:'Хөдөлгөөнт эффект',r:'Design Lab'},{t:'15:00–16:30',n:'Соёл урлаг',r:'Art Room'}]},
+    {d:'Пүрэв', cls:[{t:'08:00–09:30',n:'APP хөгжүүлэлт',r:'Lab-4'},{t:'10:00–11:30',n:'Англи хэл',r:'A103'}]},
+    {d:'Баасан', cls:[{t:'09:00–10:30',n:'IoT (Юмсын интернет)',r:'Lab-2'},{t:'11:00–12:30',n:'Уран зохиол',r:'A203'}]},
+  ],
+  'IET2022102': [
+    {d:'Даваа', cls:[{t:'08:00–09:30',n:'2D/3D Дижитал дизайн',r:'Design Lab'},{t:'11:00–12:30',n:'Монгол хэл',r:'A201'}]},
+    {d:'Мягмар', cls:[{t:'09:00–10:30',n:'Хөдөлгөөнт эффект',r:'Design Lab'},{t:'13:00–14:30',n:'Соёл урлаг',r:'Art Room'}]},
+    {d:'Лхагва', cls:[{t:'08:00–09:30',n:'МТ-ийн интерфэйс',r:'Lab-1'},{t:'10:00–11:30',n:'Уран зохиол',r:'A203'},{t:'14:00–15:30',n:'APP хөгжүүлэлт',r:'Lab-3'}]},
+    {d:'Пүрэв', cls:[{t:'09:00–10:30',n:'2D/3D Дижитал дизайн',r:'Design Lab'},{t:'11:00–12:30',n:'Математик',r:'B102'}]},
+    {d:'Баасан', cls:[{t:'09:00–10:30',n:'Хөдөлгөөнт эффект',r:'Design Lab'},{t:'13:00–14:30',n:'Англи хэл',r:'A105'}]},
+  ],
+  'IET2022103': [
+    {d:'Даваа', cls:[{t:'08:00–09:30',n:'APP хөгжүүлэлт',r:'Lab-3'},{t:'10:00–11:30',n:'Веб хөгжүүлэлт',r:'Lab-5'},{t:'13:00–14:30',n:'Монгол хэл',r:'A202'}]},
+    {d:'Мягмар', cls:[{t:'09:00–10:30',n:'IoT (Юмсын интернет)',r:'Lab-2'},{t:'11:00–12:30',n:'МТ-ийн интерфэйс',r:'Lab-1'}]},
+    {d:'Лхагва', cls:[{t:'08:00–09:30',n:'Математик',r:'B104'},{t:'10:00–11:30',n:'Англи хэл',r:'A103'},{t:'14:00–15:30',n:'Уран зохиол',r:'A203'}]},
+    {d:'Пүрэв', cls:[{t:'09:00–10:30',n:'APP хөгжүүлэлт',r:'Lab-3'},{t:'11:00–12:30',n:'Соёл урлаг',r:'Art Room'}]},
+    {d:'Баасан', cls:[{t:'09:00–10:30',n:'2D/3D Дижитал дизайн',r:'Design Lab'},{t:'13:00–14:30',n:'Монгол хэл',r:'A202'}]},
+  ],
+  'IET2022104': [
+    {d:'Даваа', cls:[{t:'08:00–09:30',n:'APP хөгжүүлэлт',r:'Lab-4'},{t:'10:00–11:30',n:'IoT (Юмсын интернет)',r:'Lab-2'}]},
+    {d:'Мягмар', cls:[{t:'09:00–10:30',n:'МТ-ийн интерфэйс',r:'Lab-1'},{t:'11:00–12:30',n:'Монгол хэл',r:'A205'},{t:'13:00–14:30',n:'Соёл урлаг',r:'Art Room'}]},
+    {d:'Лхагва', cls:[{t:'08:00–09:30',n:'2D/3D Дижитал дизайн',r:'Design Lab'},{t:'10:00–11:30',n:'Хөдөлгөөнт эффект',r:'Design Lab'}]},
+    {d:'Пүрэв', cls:[{t:'08:00–09:30',n:'Математик',r:'B101'},{t:'10:00–11:30',n:'Англи хэл',r:'A103'},{t:'13:00–14:30',n:'Уран зохиол',r:'A203'}]},
+    {d:'Баасан', cls:[{t:'09:00–10:30',n:'APP хөгжүүлэлт',r:'Lab-4'},{t:'11:00–12:30',n:'Монгол хэл',r:'A205'}]},
+  ],
+  'IET2022105': [
+    {d:'Даваа', cls:[{t:'08:00–09:30',n:'2D/3D Дижитал дизайн',r:'Design Lab'},{t:'11:00–12:30',n:'IoT (Юмсын интернет)',r:'Lab-2'}]},
+    {d:'Мягмар', cls:[{t:'09:00–10:30',n:'Хөдөлгөөнт эффект',r:'Design Lab'},{t:'13:00–14:30',n:'APP хөгжүүлэлт',r:'Lab-3'}]},
+    {d:'Лхагва', cls:[{t:'08:00–09:30',n:'МТ-ийн интерфэйс',r:'Lab-1'},{t:'10:00–11:30',n:'Монгол хэл',r:'A201'},{t:'14:00–15:30',n:'Соёл урлаг',r:'Art Room'}]},
+    {d:'Пүрэв', cls:[{t:'09:00–10:30',n:'2D/3D Дижитал дизайн',r:'Design Lab'},{t:'11:00–12:30',n:'Уран зохиол',r:'A203'}]},
+    {d:'Баасан', cls:[{t:'09:00–10:30',n:'Хөдөлгөөнт эффект',r:'Design Lab'},{t:'11:00–12:30',n:'Англи хэл',r:'A105'},{t:'13:00–14:30',n:'Математик',r:'B102'}]},
+  ],
+  'IET2022106': [
+    {d:'Даваа', cls:[{t:'08:00–09:30',n:'APP хөгжүүлэлт',r:'Lab-3'},{t:'10:00–11:30',n:'Монгол хэл',r:'A202'},{t:'13:00–14:30',n:'IoT (Юмсын интернет)',r:'Lab-2'}]},
+    {d:'Мягмар', cls:[{t:'09:00–10:30',n:'МТ-ийн интерфэйс',r:'Lab-1'},{t:'11:00–12:30',n:'Уран зохиол',r:'A203'}]},
+    {d:'Лхагва', cls:[{t:'08:00–09:30',n:'Математик',r:'B103'},{t:'10:00–11:30',n:'2D/3D Дижитал дизайн',r:'Design Lab'},{t:'14:00–15:30',n:'Соёл урлаг',r:'Art Room'}]},
+    {d:'Пүрэв', cls:[{t:'09:00–10:30',n:'APP хөгжүүлэлт',r:'Lab-3'},{t:'11:00–12:30',n:'Англи хэл',r:'A103'}]},
+    {d:'Баасан', cls:[{t:'09:00–10:30',n:'Хөдөлгөөнт эффект',r:'Design Lab'},{t:'13:00–14:30',n:'Монгол хэл',r:'A202'}]},
+  ],
+  'IET2022107': [
+    {d:'Даваа', cls:[{t:'08:00–09:30',n:'APP хөгжүүлэлт',r:'Lab-4'},{t:'10:00–11:30',n:'Веб хөгжүүлэлт',r:'Lab-5'},{t:'13:00–14:30',n:'Монгол хэл',r:'A204'}]},
+    {d:'Мягмар', cls:[{t:'09:00–10:30',n:'IoT (Юмсын интернет)',r:'Lab-2'},{t:'11:00–12:30',n:'МТ-ийн интерфэйс',r:'Lab-1'}]},
+    {d:'Лхагва', cls:[{t:'08:00–09:30',n:'Математик',r:'B101'},{t:'10:00–11:30',n:'Уран зохиол',r:'A203'},{t:'14:00–15:30',n:'Соёл урлаг',r:'Art Room'}]},
+    {d:'Пүрэв', cls:[{t:'09:00–10:30',n:'2D/3D Дижитал дизайн',r:'Design Lab'},{t:'11:00–12:30',n:'Англи хэл',r:'A103'}]},
+    {d:'Баасан', cls:[{t:'09:00–10:30',n:'APP хөгжүүлэлт',r:'Lab-4'},{t:'11:00–12:30',n:'Монгол хэл',r:'A204'}]},
+  ],
+  'IET2022108': [
+    {d:'Даваа', cls:[{t:'08:00–09:30',n:'APP хөгжүүлэлт',r:'Lab-4'},{t:'10:00–11:30',n:'IoT (Юмсын интернет)',r:'Lab-2'},{t:'13:00–14:30',n:'Монгол хэл',r:'A201'}]},
+    {d:'Мягмар', cls:[{t:'09:00–10:30',n:'Веб хөгжүүлэлт',r:'Lab-5'},{t:'11:00–12:30',n:'МТ-ийн интерфэйс',r:'Lab-1'},{t:'13:00–14:30',n:'Уран зохиол',r:'A203'}]},
+    {d:'Лхагва', cls:[{t:'08:00–09:30',n:'2D/3D Дижитал дизайн',r:'Design Lab'},{t:'10:00–11:30',n:'Математик',r:'B101'},{t:'14:00–15:30',n:'Соёл урлаг',r:'Art Room'}]},
+    {d:'Пүрэв', cls:[{t:'09:00–10:30',n:'APP хөгжүүлэлт',r:'Lab-4'},{t:'11:00–12:30',n:'Англи хэл',r:'A103'}]},
+    {d:'Баасан', cls:[{t:'09:00–10:30',n:'IoT (Юмсын интернет)',r:'Lab-2'},{t:'11:00–12:30',n:'Монгол хэл',r:'A201'},{t:'13:00–14:30',n:'МТ-ийн интерфэйс',r:'Lab-1'}]},
+  ],
+};
+
+let currentUser = null;
+
+/* grade badge */
+function gbClass(g){ return {A:'ga',B:'gb',C:'gc',D:'gd',F:'gf'}[g]||'gb'; }
+
+function renderGrades(){
+  const acc = ACCOUNTS[currentUser];
+  const si = parseInt(document.getElementById('semSel').value);
+  const rows = acc.semesters[si]||[];
+  const body = document.getElementById('gBody');
+  const dc = deptColor;
+  body.innerHTML = rows.map((r,i)=>{
+    const icon = SUBJECT_ICONS[r.n]||'📌';
+    const col = dc(r.dept);
+    return `<tr>
+      <td style="color:var(--muted)">${i+1}</td>
+      <td><span style="margin-right:8px">${icon}</span>${r.n}</td>
+      <td><span class="dept-chip" style="background:${col.bg};color:${col.c};border-color:${col.b}">${r.dept}</span></td>
+      <td style="font-weight:600;color:var(--cyan)">${r.cr}</td>
+      <td><b style="color:${r.sc>=90?'var(--green)':r.sc>=80?'var(--cyan)':r.sc>=70?'var(--accent)':'var(--red)'}">${r.sc}%</b></td>
+      <td><span class="gbadge ${gbClass(r.g)}">${r.g}</span></td>
+      <td><span class="gpa-val" style="color:${r.gp>=3.5?'var(--green)':r.gp>=3?'var(--cyan)':'var(--accent)'}">${r.gp.toFixed(1)}</span></td>
+    </tr>`;
+  }).join('');
+
+  // summary
+  const avg = rows.length ? (rows.reduce((s,r)=>s+r.gp,0)/rows.length).toFixed(2) : '—';
+  const totalCr = rows.reduce((s,r)=>s+r.cr,0);
+  const topGrade = rows.filter(r=>r.g==='A').length;
+  document.getElementById('gpaSummary').innerHTML = `
+    <div class="gpa-item"><div class="gv">${rows.length}</div><div class="gl">Хичээлийн тоо</div></div>
+    <div class="gpa-item"><div class="gv">${totalCr}</div><div class="gl">Нийт кредит</div></div>
+    <div class="gpa-item"><div class="gv">${avg}</div><div class="gl">Улирлын GPA</div></div>
+    <div class="gpa-item"><div class="gv" style="color:var(--green)">${topGrade}</div><div class="gl">A үнэлгээ</div></div>
+  `;
+}
+
+function renderSchedule(){
+  const sched = SCHEDULES[currentUser]||[];
+  document.getElementById('schedGrid').innerHTML = sched.map(day=>{
+    const cls = day.cls.map(c=>{
+      const icon = SUBJECT_ICONS[c.n]||'📌';
+      return `<div class="sclass">
+        <div class="sc-time">${c.t}</div>
+        <div class="sc-name">${icon} ${c.n}</div>
+        <div class="sc-room">🏫 ${c.r}</div>
+      </div>`;
+    }).join('');
+    return `<div class="sched-day">
+      <div class="sday-head">${day.d}</div>
+      ${cls}
+    </div>`;
+  }).join('');
+}
+
+function renderProfile(){
+  const acc = ACCOUNTS[currentUser];
+  const PROFILE_LABELS = [
+    ['Овог нэр', acc.name],
+    ['Оюутны ID', currentUser],
+    ['Тэнхим', acc.dept],
+    ['Курс', acc.course],
+    ['Элссэн он', acc.year + ' он'],
+    ['Утас', acc.phone],
+    ['И-мэйл', acc.email],
+    ['Нийт кредит', acc.credits + ' / 120'],
+    ['Дундаж GPA', acc.gpa.toFixed(1)],
+    ['Ирц', acc.att],
+  ];
+  document.getElementById('profileCard').innerHTML = PROFILE_LABELS.map(([l,v])=>`
+    <div class="profile-row">
+      <div class="pr-label">${l}</div>
+      <div class="pr-val">${v}</div>
+    </div>
+  `).join('');
+}
+
+function loadDashboard(){
+  const acc = ACCOUNTS[currentUser];
+  // Topbar
+  document.getElementById('tbAv').style.background = acc.color;
+  document.getElementById('tbAv').textContent = acc.init;
+  document.getElementById('tbName').textContent = acc.short;
+  // Hero
+  document.getElementById('hAv').style.background = acc.color;
+  document.getElementById('hAv').textContent = acc.init;
+  document.getElementById('hName').textContent = acc.name;
+  document.getElementById('hId').textContent = 'Оюутны ID: ' + currentUser;
+  document.getElementById('hDept').textContent = acc.dept + ' · ' + acc.course;
+  document.getElementById('hTags').innerHTML = acc.tags.map(t=>
+    `<span class="htag" style="color:${t.c};border-color:${t.c};background:${t.c}18">${t.t}</span>`
+  ).join('');
+  // Stats
+  document.getElementById('sCred').textContent = acc.credits;
+  document.getElementById('sGpa').textContent = acc.gpa.toFixed(1);
+  document.getElementById('sAtt').textContent = acc.att;
+  document.getElementById('sSub').textContent = acc.semesters[0].length;
+  // render
+  document.getElementById('semSel').value = '0';
+  renderGrades();
+  renderSchedule();
+  renderProfile();
+  // reset tabs
+  document.querySelectorAll('.tab-btn').forEach((b,i)=>b.classList.toggle('active',i===0));
+  document.querySelectorAll('.tab-pane').forEach((p,i)=>p.classList.toggle('active',i===0));
+}
+
+function doLogin(){
+  const id = document.getElementById('inId').value.trim();
+  const pw = document.getElementById('inPw').value.trim();
+  const acc = ACCOUNTS[id];
+  if(acc && acc.pw===pw){
+    currentUser = id;
+    document.getElementById('loginPage').style.display='none';
+    document.getElementById('dashboard').style.display='block';
+    loadDashboard();
+    document.getElementById('errMsg').style.display='none';
+  } else {
+    document.getElementById('errMsg').style.display='block';
+    document.getElementById('inPw').value='';
+  }
+}
+
+function doLogout(){
+  document.getElementById('dashboard').style.display='none';
+  document.getElementById('loginPage').style.display='flex';
+  document.getElementById('inId').value='';
+  document.getElementById('inPw').value='';
+  currentUser=null;
+}
+
+function fillDemo(id,pw){
+  document.getElementById('inId').value=id;
+  document.getElementById('inPw').value=pw;
+  document.getElementById('errMsg').style.display='none';
+}
+
+function switchTab(name,btn){
+  document.querySelectorAll('.tab-pane').forEach(p=>p.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
+  document.getElementById('pane-'+name).classList.add('active');
+  btn.classList.add('active');
+}
+
+/* ══════════════════════════════════════
+   EXCEL / CSV EXPORT FUNCTIONS
+══════════════════════════════════════ */
+
+const SEM_LABELS = ['2024-2025 Намрын улирал','2023-2024 Хаврын улирал','2022-2023 Намрын улирал'];
+
+function exportGradesCSV() {
+  const acc = ACCOUNTS[currentUser];
+  const si = parseInt(document.getElementById('semSel').value);
+  const rows = acc.semesters[si] || [];
+  const semLabel = SEM_LABELS[si] || 'Улирал';
+  const totalCr = rows.reduce((s,r)=>s+r.cr,0);
+  const avgGpa = rows.length ? (rows.reduce((s,r)=>s+r.gp,0)/rows.length).toFixed(2) : '0';
+  const avgScore = rows.length ? (rows.reduce((s,r)=>s+r.sc,0)/rows.length).toFixed(1) : '0';
+  const aCount = rows.filter(r=>r.g==='A').length;
+
+  let csv = '\uFEFF';
+  csv += 'IET Политехник Коллеж — Дүнгийн тайлан\n';
+  csv += 'Оюутан:,' + acc.name + '\n';
+  csv += 'Оюутны ID:,' + currentUser + '\n';
+  csv += 'Тэнхим:,' + acc.dept + '\n';
+  csv += 'Улирал:,' + semLabel + '\n';
+  csv += 'Огноо:,' + new Date().toLocaleDateString('mn-MN') + '\n\n';
+  csv += '#,Хичээлийн нэр,Тэнхим,Кредит,Оноо (%),Үнэлгээ,GPA\n';
+  rows.forEach((r,i) => { csv += (i+1) + ',"' + r.n + '","' + r.dept + '",' + r.cr + ',' + r.sc + ',' + r.g + ',' + r.gp.toFixed(1) + '\n'; });
+  csv += '\nДҮН\n';
+  csv += 'Хичээлийн тоо:,' + rows.length + '\n';
+  csv += 'Нийт кредит:,' + totalCr + '\n';
+  csv += 'Улирлын GPA:,' + avgGpa + '\n';
+  csv += 'Дундаж оноо:,' + avgScore + '%\n';
+  csv += 'A үнэлгээ:,' + aCount + ' хичээл\n';
+
+  const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'IET_Дүн_' + currentUser + '_' + semLabel.replace(/\s/g,'_') + '.csv';
+  a.click(); URL.revokeObjectURL(url);
+  showToast('✓ CSV файл татагдлаа');
+}
+
+function exportGradesExcel() {
+  const acc = ACCOUNTS[currentUser];
+  const si = parseInt(document.getElementById('semSel').value);
+  const rows = acc.semesters[si] || [];
+  const semLabel = SEM_LABELS[si] || 'Улирал';
+  const totalCr = rows.reduce((s,r)=>s+r.cr,0);
+  const avgGpa = rows.length ? (rows.reduce((s,r)=>s+r.gp,0)/rows.length).toFixed(2) : '0';
+  const avgScore = rows.length ? (rows.reduce((s,r)=>s+r.sc,0)/rows.length).toFixed(1) : '0';
+  const aCount = rows.filter(r=>r.g==='A').length;
+
+  function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+  function C(v,t,s) { return '<Cell ss:StyleID="'+s+'"><Data ss:Type="'+(t||'String')+'">' + esc(v) + '</Data></Cell>'; }
+
+  let xmlRows = '';
+  xmlRows += '<Row ss:Height="24"><Cell ss:MergeAcross="6" ss:StyleID="sTitle"><Data ss:Type="String">IET Политехник Коллеж — Дүнгийн тайлан</Data></Cell></Row>';
+  [['Оюутан',acc.name],['Оюутны ID',currentUser],['Тэнхим',acc.dept],['Улирал',semLabel],['Огноо',new Date().toLocaleDateString('mn-MN')]].forEach(([k,v]) => {
+    xmlRows += '<Row ss:Height="16">'+C(k,'String','sInfoKey')+C(v,'String','sInfoVal')+'</Row>';
+  });
+  xmlRows += '<Row ss:Height="10"/>';
+  ['#','Хичээлийн нэр','Тэнхим','Кредит','Оноо (%)','Үнэлгээ','GPA'].forEach(h => { xmlRows += ''; });
+  xmlRows += '<Row ss:Height="18">';
+  ['#','Хичээлийн нэр','Тэнхим','Кредит','Оноо (%)','Үнэлгээ','GPA'].forEach(h => { xmlRows += C(h,'String','sHeader'); });
+  xmlRows += '</Row>';
+  rows.forEach((r,i) => {
+    const gs = r.g==='A'?'sA':r.g==='B'?'sB':r.g==='C'?'sC':'sD';
+    const rs = (i%2===0)?'sRow':'sRow2';
+    xmlRows += '<Row ss:Height="15">' + C(i+1,'Number',rs) + C(r.n,'String',rs) + C(r.dept,'String',rs) + C(r.cr,'Number',rs) + C(r.sc,'Number',rs) + '<Cell ss:StyleID="'+gs+'"><Data ss:Type="String">'+esc(r.g)+'</Data></Cell>' + C(r.gp.toFixed(1),'Number',rs) + '</Row>';
+  });
+  xmlRows += '<Row ss:Height="10"/>';
+  [['Хичээлийн тоо',rows.length,'Number'],['Нийт кредит',totalCr,'Number'],['Улирлын GPA',avgGpa,'Number'],['Дундаж оноо (%)',avgScore,'Number'],['A үнэлгээ',aCount,'Number']].forEach(([k,v,t]) => {
+    xmlRows += '<Row ss:Height="16">'+C(k,'String','sSumKey')+C(v,t,'sSumVal')+'</Row>';
+  });
+
+  const styles = '<Style ss:ID="sTitle"><Alignment ss:Horizontal="Center" ss:Vertical="Center"/><Font ss:Bold="1" ss:Size="14" ss:Color="#0B1832"/><Interior ss:Color="#00C8FF" ss:Pattern="Solid"/></Style>' +
+    '<Style ss:ID="sHeader"><Alignment ss:Horizontal="Center" ss:Vertical="Center"/><Font ss:Bold="1" ss:Size="11" ss:Color="#FFFFFF"/><Interior ss:Color="#1A4A8A" ss:Pattern="Solid"/></Style>' +
+    '<Style ss:ID="sRow"><Alignment ss:Horizontal="Center"/><Font ss:Size="11" ss:Color="#1A1A2E"/><Interior ss:Color="#F0F8FF" ss:Pattern="Solid"/><Borders><Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#CCDDEE"/></Borders></Style>' +
+    '<Style ss:ID="sRow2"><Alignment ss:Horizontal="Center"/><Font ss:Size="11" ss:Color="#1A1A2E"/><Interior ss:Color="#FFFFFF" ss:Pattern="Solid"/><Borders><Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#CCDDEE"/></Borders></Style>' +
+    '<Style ss:ID="sInfoKey"><Font ss:Bold="1" ss:Size="10" ss:Color="#1A4A8A"/><Interior ss:Color="#E8F4FF" ss:Pattern="Solid"/></Style>' +
+    '<Style ss:ID="sInfoVal"><Font ss:Size="11" ss:Color="#0B1832"/><Interior ss:Color="#F8FCFF" ss:Pattern="Solid"/></Style>' +
+    '<Style ss:ID="sSumKey"><Font ss:Bold="1" ss:Size="11" ss:Color="#1A4A8A"/><Interior ss:Color="#E0F0FF" ss:Pattern="Solid"/></Style>' +
+    '<Style ss:ID="sSumVal"><Font ss:Bold="1" ss:Size="12" ss:Color="#004488"/><Alignment ss:Horizontal="Center"/><Interior ss:Color="#D0E8FF" ss:Pattern="Solid"/></Style>' +
+    '<Style ss:ID="sA"><Alignment ss:Horizontal="Center"/><Font ss:Bold="1" ss:Size="11" ss:Color="#006633"/><Interior ss:Color="#C8FFE0" ss:Pattern="Solid"/></Style>' +
+    '<Style ss:ID="sB"><Alignment ss:Horizontal="Center"/><Font ss:Bold="1" ss:Size="11" ss:Color="#004488"/><Interior ss:Color="#C8E8FF" ss:Pattern="Solid"/></Style>' +
+    '<Style ss:ID="sC"><Alignment ss:Horizontal="Center"/><Font ss:Bold="1" ss:Size="11" ss:Color="#884400"/><Interior ss:Color="#FFE8C0" ss:Pattern="Solid"/></Style>' +
+    '<Style ss:ID="sD"><Alignment ss:Horizontal="Center"/><Font ss:Bold="1" ss:Size="11" ss:Color="#880022"/><Interior ss:Color="#FFD0D8" ss:Pattern="Solid"/></Style>';
+
+  const xml = '<?xml version="1.0" encoding="UTF-8"?><?mso-application progid="Excel.Sheet"?>' +
+    '<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">' +
+    '<Styles>' + styles + '</Styles>' +
+    '<Worksheet ss:Name="Дүн"><Table>' +
+    '<Column ss:Width="30"/><Column ss:Width="195"/><Column ss:Width="145"/><Column ss:Width="55"/><Column ss:Width="65"/><Column ss:Width="55"/><Column ss:Width="55"/>' +
+    xmlRows + '</Table></Worksheet></Workbook>';
+
+  const blob = new Blob([xml], {type:'application/vnd.ms-excel;charset=utf-8'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'IET_Дүн_' + currentUser + '_' + semLabel.replace(/[\s\u2013]/g,'_') + '.xls';
+  a.click(); URL.revokeObjectURL(url);
+  showToast('✅ Excel файл татагдлаа!');
+}
+
+function showToast(msg) {
+  const t = document.createElement('div');
+  t.style.cssText = 'position:fixed;bottom:28px;left:50%;transform:translateX(-50%);background:var(--card);border:1px solid rgba(0,229,160,0.4);padding:12px 24px;border-radius:12px;color:var(--green);font-size:13px;font-weight:700;z-index:99999;box-shadow:0 8px 32px rgba(0,0,0,.5);white-space:nowrap;';
+  t.textContent = msg;
+  document.body.appendChild(t);
+  setTimeout(()=>{ t.style.opacity='0'; t.style.transition='opacity .4s'; setTimeout(()=>t.remove(),400); }, 2800);
+}
+
+/* ══════════════════════════════════════
+   AUTH INTEGRATION JAVASCRIPT
+   OTP verification system
+══════════════════════════════════════ */
+
+/* ── MODAL HELPERS ── */
+function openModal(id) {
+  document.getElementById(id).classList.remove('hidden');
+  document.body.style.overflow = 'hidden';
+}
+function closeModal(id) {
+  document.getElementById(id).classList.add('hidden');
+  document.body.style.overflow = '';
+}
+
+// Close modal on overlay click
+document.addEventListener('click', function(e) {
+  if (e.target.classList.contains('auth-overlay')) {
+    e.target.classList.add('hidden');
+    document.body.style.overflow = '';
+  }
+});
+
+/* ── OTP HELPERS ── */
+function otpNav(input, nextId) {
+  if (input.value && nextId) {
+    document.getElementById(nextId).focus();
+  }
+}
+function otpBack(e, input, prevId) {
+  if (e.key === 'Backspace' && !input.value && prevId) {
+    document.getElementById(prevId).focus();
+  }
+}
+
+function getOTP(prefix) {
+  let code = '';
+  for (let i = 1; i <= 6; i++) {
+    const el = document.getElementById(prefix + i);
+    if (el) code += el.value;
+  }
+  return code;
+}
+
+function clearOTP(prefix) {
+  for (let i = 1; i <= 6; i++) {
+    const el = document.getElementById(prefix + i);
+    if (el) el.value = '';
+  }
+  const first = document.getElementById(prefix + '1');
+  if (first) first.focus();
+}
+
+/* ── TIMER ── */
+let timers = {};
+function startTimer(elId, seconds, onExpire) {
+  if (timers[elId]) clearInterval(timers[elId]);
+  let remaining = seconds;
+  const el = document.getElementById(elId);
+  timers[elId] = setInterval(() => {
+    remaining--;
+    if (el) {
+      const m = Math.floor(remaining / 60);
+      const s = remaining % 60;
+      el.textContent = m + ':' + (s < 10 ? '0' : '') + s;
+    }
+    if (remaining <= 0) {
+      clearInterval(timers[elId]);
+      if (onExpire) onExpire();
+    }
+  }, 1000);
+}
+
+/* ══════════════════════════════════════
+   EMAIL OTP — FIREBASE + EMAILJS (БОДИТ)
+══════════════════════════════════════ */
+
+/* Firebase бэлэн болох хүртэл хүлээх helper */
+function waitFirebase() {
+  return new Promise(resolve => {
+    if (window._firebaseReady) { resolve(); return; }
+    document.addEventListener('firebase-ready', resolve, { once: true });
+    setTimeout(resolve, 5000); // 5с-ын дараа timeout
+  });
+}
+
+/* ── Gmail нэвтрэх OTP (БОДИТ МАЙЛ) ── */
+let gmailPendingEmail = '';
+
+async function gmailSendOTP() {
+  const email = document.getElementById('gEmailIn').value.trim();
+  if (!email || !email.includes('@')) {
+    showMsg('gMsg1', 'error', '⚠ Зөв имэйл хаяг оруулна уу');
+    return;
+  }
+
+  const btn = document.querySelector('#gstep1 .btn-auth');
+  btn.disabled = true;
+  btn.textContent = '📧 Илгээж байна...';
+  showMsg('gMsg1', 'info', '⏳ Имэйл илгээж байна...');
+
+  try {
+    await waitFirebase();
+    if (!window._sendEmailOTP) throw new Error('Firebase холбогдоогүй байна');
+
+    await window._sendEmailOTP(email, 'login');
+    gmailPendingEmail = email;
+
+    showMsg('gMsg1', 'success', '✓ ' + email + ' руу баталгаажуулах код илгээлээ!');
+    setTimeout(() => {
+      hideSection('gstep1');
+      showSection('gstep2');
+      setStepActive('gs1', 'gs2', 'gline1');
+      document.getElementById('gOtpDesc').innerHTML =
+        '📬 <b style="color:var(--cyan)">' + email + '</b> руу 6 оронтой код илгээлээ.<br>' +
+        'Имэйлээ шалгана уу. Хугацаа: <span class="otp-timer" id="gTimer">3:00</span>';
+      startTimer('gTimer', 180, () => showMsg('gMsg2', 'error', '⏰ Хугацаа дуусав. Дахин илгээнэ үү.'));
+      document.getElementById('go1').focus();
+    }, 800);
+  } catch (err) {
+    console.error('Gmail OTP send error:', err);
+    const isConfig = err.message && (err.message.includes('YOUR_') || err.message.includes('Invalid'));
+    showMsg('gMsg1', 'error', isConfig
+      ? '⚙️ Firebase/EmailJS тохиргоо хийгдээгүй байна. index.html-ийн эхэнд тохируулна уу.'
+      : '✕ Майл илгээхэд алдаа гарлаа: ' + err.message);
+    btn.disabled = false;
+    btn.textContent = '📧 КОД ИЛГЭЭХ';
+  }
+}
+
+async function gmailVerify() {
+  const code = getOTP('go');
+  if (code.length < 6) { showMsg('gMsg2', 'error', '⚠ 6 оронтой кодыг бүтэн оруулна уу'); return; }
+
+  const btn = document.querySelector('#gstep2 .btn-auth');
+  btn.disabled = true;
+  btn.textContent = '🔍 Шалгаж байна...';
+
+  try {
+    await waitFirebase();
+    const result = await window._verifyEmailOTP(gmailPendingEmail, 'login', code);
+    if (result.ok) {
+      hideSection('gstep2'); showSection('gstep3');
+      setStepDone('gs1'); setStepDone('gs2'); setStepDone('gs3');
+      setLineDone('gline1'); setLineDone('gline2');
+      setTimeout(() => {
+        closeModal('modalGmail');
+        loginAsDemo('IET2021001');
+      }, 1800);
+    } else {
+      showMsg('gMsg2', 'error', result.reason);
+      clearOTP('go');
+      btn.disabled = false;
+      btn.textContent = '✓ БАТАЛГААЖУУЛАХ';
+    }
+  } catch (err) {
+    console.error('Gmail verify error:', err);
+    showMsg('gMsg2', 'error', '✕ Шалгахад алдаа гарлаа: ' + err.message);
+    btn.disabled = false;
+    btn.textContent = '✓ БАТАЛГААЖУУЛАХ';
+  }
+}
+
+async function gmailResend() {
+  if (!gmailPendingEmail) { showMsg('gMsg2', 'error', '⚠ Эхлээд имэйл оруулна уу'); return; }
+  try {
+    showMsg('gMsg2', 'info', '⏳ Дахин илгээж байна...');
+    await waitFirebase();
+    await window._sendEmailOTP(gmailPendingEmail, 'login');
+    showMsg('gMsg2', 'success', '✓ Дахин код илгээлээ!');
+    startTimer('gTimer', 180, () => showMsg('gMsg2', 'error', '⏰ Хугацаа дуусав.'));
+  } catch (err) {
+    showMsg('gMsg2', 'error', '✕ Дахин илгээхэд алдаа: ' + err.message);
+  }
+}
+
+function gmailBack() {
+  hideSection('gstep2');
+  showSection('gstep1');
+  resetStep('gs2', 'gline1');
+  const btn = document.querySelector('#gstep1 .btn-auth');
+  if (btn) { btn.disabled = false; btn.textContent = '📧 КОД ИЛГЭЭХ'; }
+}
+
+
+
+/* ══════════════════════════════════════
+   SMS / БАНК OTP — DEMO (backend шаардагдана)
+   Утас, Хаан банк, Төрийн банкны SMS нь
+   бодит SMS gateway API шаарддаг тул
+   demo горимд ажиллана.
+══════════════════════════════════════ */
+const _SMS_OTP_STORE = {};
+function _genOTP() { return String(Math.floor(100000 + Math.random() * 900000)); }
+function _smsOTPSend(key) {
+  const code = _genOTP();
+  _SMS_OTP_STORE[key] = { code, exp: Date.now() + 180000 };
+  console.log('[IET SMS-Demo OTP] ' + key + ' → ' + code);
+  return code;
+}
+function _smsOTPVerify(key, entered) {
+  const rec = _SMS_OTP_STORE[key];
+  if (!rec) return { ok: false, reason: 'Код олдсонгүй. Дахин илгээнэ үү.' };
+  if (Date.now() > rec.exp) { delete _SMS_OTP_STORE[key]; return { ok: false, reason: '⏰ Кодын хугацаа дуусав.' }; }
+  if (rec.code !== entered) return { ok: false, reason: '✕ Код буруу байна.' };
+  delete _SMS_OTP_STORE[key];
+  return { ok: true };
+}
+
+
+let phoneOTPKey = 'phone_login';
+
+function phoneSendOTP() {
+  const phone = document.getElementById('pPhoneIn').value.trim();
+  if (phone.length < 8) { showMsg('pMsg1', 'error', '⚠ 8 оронтой утасны дугаар оруулна уу'); return; }
+  const code = _smsOTPSend(phoneOTPKey);
+  showMsg('pMsg1', 'success', '✓ +976 ' + phone + ' руу код илгээлээ! (Demo: ' + code + ')');
+  setTimeout(() => {
+    hideSection('pstep1'); showSection('pstep2');
+    setStepActive('ps1','ps2','pline1');
+    document.getElementById('pPhoneDisplay').textContent = phone;
+    document.getElementById('pOtpDesc').innerHTML =
+      '+976 <b style="color:var(--cyan)">' + phone + '</b> дугаарт kod илгээлээ.<br>Хугацаа: <span class="otp-timer" id="pTimer">3:00</span>';
+    startTimer('pTimer', 180);
+    document.getElementById('po1').focus();
+  }, 1200);
+}
+
+function phoneVerify() {
+  const code = getOTP('po');
+  if (code.length < 6) { showMsg('pMsg2','error','⚠ 6 оронтой кодыг бүтэн оруулна уу'); return; }
+  const _pRes = _smsOTPVerify(phoneOTPKey, code);
+  if (_pRes.ok) {
+    hideSection('pstep2'); showSection('pstep3');
+    setStepDone('ps1'); setStepDone('ps2'); setStepDone('ps3');
+    setLineDone('pline1'); setLineDone('pline2');
+    setTimeout(() => { closeModal('modalPhone'); loginAsDemo('IET2021001'); }, 2000);
+  } else {
+    showMsg('pMsg2','error', _pRes.reason);
+    clearOTP('po');
+  }
+}
+
+function phoneResend() {
+  const code = _smsOTPSend(phoneOTPKey);
+  showMsg('pMsg2','info','✓ Дахин код илгээлээ (Demo: ' + code + ')');
+  startTimer('pTimer', 180);
+}
+function phoneBack() { hideSection('pstep2'); showSection('pstep1'); resetStep('ps2','pline1'); }
+
+/* ══════════════ KHAN BANK AUTH ══════════════ */
+let khanOTPKey = 'khan_login';
+let khanOTPSent = false;
+
+function khanTab(type, btn) {
+  document.querySelectorAll('#modalKhan .auth-tab').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('khanSms').style.display = type==='sms' ? '' : 'none';
+  document.getElementById('khanApp').style.display = type==='app' ? '' : 'none';
+  document.getElementById('khanAccount').style.display = type==='account' ? '' : 'none';
+}
+
+function khanSendSMS() {
+  const phone = document.getElementById('khanPhone').value.trim();
+  if (phone.length < 8) { showMsg('khanMsg','error','⚠ 8 оронтой дугаар оруулна уу'); return; }
+  const code = _smsOTPSend(khanOTPKey);
+  showMsg('khanMsg','success','✓ +976 ' + phone + ' руу Хаан банк SMS илгээлээ! (Demo: ' + code + ')');
+  document.getElementById('khanOtpBox').classList.add('visible');
+  document.getElementById('khanSmsBtn').style.display = 'none';
+  document.getElementById('khanVerifyBtn').style.display = '';
+  startTimer('khanTimer', 180);
+  document.getElementById('kh1').focus();
+  khanOTPSent = true;
+}
+
+function khanVerify() {
+  const code = getOTP('kh');
+  if (code.length < 6) { showMsg('khanMsg','error','⚠ 6 оронтой кодыг бүтэн оруулна уу'); return; }
+  const _kRes = _smsOTPVerify(khanOTPKey, code);
+  if (_kRes.ok) {
+    showMsg('khanMsg','success','✅ Хаан банк баталгаажлаа!');
+    setTimeout(() => { closeModal('modalKhan'); loginAsDemo('IET2021001'); }, 1500);
+  } else {
+    showMsg('khanMsg','error', _kRes.reason);
+    clearOTP('kh');
+  }
+}
+
+function khanAppOpen() {
+  showMsg('khanMsg','info','📲 Хаан банкны апп руу дамжуулж байна...');
+  setTimeout(() => {
+    showMsg('khanMsg','success','✅ Апп зөвшөөрөл баталгаажлаа!');
+    setTimeout(() => { closeModal('modalKhan'); loginAsDemo('IET2021001'); }, 1500);
+  }, 3000);
+}
+
+function khanAccountVerify() {
+  const acc = document.getElementById('khanAccNum').value.trim();
+  const name = document.getElementById('khanAccName').value.trim();
+  if (acc.length < 8 || !name) { showMsg('khanAccMsg','error','⚠ Дансны дугаар болон нэрийг оруулна уу'); return; }
+  showMsg('khanAccMsg','info','🔍 Дансны мэдээлэл шалгаж байна...');
+  setTimeout(() => {
+    showMsg('khanAccMsg','success','✅ Данс баталгаажлаа! ' + name);
+    setTimeout(() => { closeModal('modalKhan'); loginAsDemo('IET2021001'); }, 1500);
+  }, 2000);
+}
+
+/* ══════════════ STATE BANK AUTH ══════════════ */
+let stateOTPKey = 'state_login';
+let stateOTPSent = false;
+
+function stateSendSMS() {
+  const phone = document.getElementById('statePhone').value.trim();
+  if (phone.length < 8) { showMsg('stateMsg','error','⚠ 8 оронтой дугаар оруулна уу'); return; }
+  const code = _smsOTPSend(stateOTPKey);
+  showMsg('stateMsg','success','✓ +976 ' + phone + ' руу Төрийн банк SMS! (Demo: ' + code + ')');
+  document.getElementById('stateOtpBox').classList.add('visible');
+  document.getElementById('stateSmsBtn').style.display = 'none';
+  document.getElementById('stateVerifyBtn').style.display = '';
+  startTimer('stateTimer', 180);
+  document.getElementById('sb1').focus();
+}
+
+function stateVerify() {
+  const code = getOTP('sb');
+  if (code.length < 6) { showMsg('stateMsg','error','⚠ 6 оронтой кодыг бүтэн оруулна уу'); return; }
+  const _sRes = _smsOTPVerify(stateOTPKey, code);
+  if (_sRes.ok) {
+    showMsg('stateMsg','success','✅ Төрийн банк баталгаажлаа!');
+    setTimeout(() => { closeModal('modalState'); loginAsDemo('IET2021001'); }, 1500);
+  } else {
+    showMsg('stateMsg','error', _sRes.reason);
+    clearOTP('sb');
+  }
+}
+
+/* ══════════════ QPAY AUTH ══════════════ */
+function openQpayLogin() {
+  document.getElementById('qpayAmount').textContent = '₮0';
+  document.getElementById('qpayLabel').textContent = 'Нэвтрэх баталгаажуулалт';
+  document.getElementById('qpayMsg').className = 'auth-msg info';
+  document.getElementById('qpayMsg').textContent = 'QR код уншуулна уу...';
+  document.getElementById('qpayMsg').style.display = 'block';
+  openModal('modalQpay');
+  drawQRCode('qpayQrCanvas', 'https://qpay.mn/q/IET-AUTH-' + Date.now());
+}
+
+function drawQRCode(canvasId, data) {
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const size = 156;
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, size, size);
+  ctx.fillStyle = '#000000';
+  // Draw QR-like pattern (visual demo)
+  const cell = 6;
+  const grid = Math.floor(size / cell);
+  // Seed based on data length
+  let seed = data.length;
+  function rng() { seed = (seed * 1664525 + 1013904223) & 0xffffffff; return (seed >>> 0) / 4294967296; }
+  for (let r = 0; r < grid; r++) {
+    for (let c = 0; c < grid; c++) {
+      // Finder patterns
+      const inFinder = (r<7&&c<7)||(r<7&&c>=grid-7)||(r>=grid-7&&c<7);
+      if (inFinder) {
+        const fr = r%7, fc = c%7;
+        if (fr===0||fr===6||fc===0||fc===6||(fr>=2&&fr<=4&&fc>=2&&fc<=4)) {
+          ctx.fillRect(c*cell, r*cell, cell, cell);
+        }
+        continue;
+      }
+      if (rng() > 0.5) ctx.fillRect(c*cell, r*cell, cell, cell);
+    }
+  }
+}
+
+function qpayOpenApp(name) {
+  document.getElementById('qpayMsg').className = 'auth-msg info';
+  document.getElementById('qpayMsg').style.display = 'block';
+  document.getElementById('qpayMsg').textContent = '📲 ' + name + ' апп руу дамжуулж байна...';
+  setTimeout(() => {
+    document.getElementById('qpayMsg').className = 'auth-msg success';
+    document.getElementById('qpayMsg').textContent = '✅ ' + name + ' -аар баталгаажлаа!';
+    setTimeout(() => { closeModal('modalQpay'); loginAsDemo('IET2021001'); }, 1500);
+  }, 2500);
+}
+
+function qpayCheck() {
+  document.getElementById('qpayMsg').className = 'auth-msg info';
+  document.getElementById('qpayMsg').style.display = 'block';
+  document.getElementById('qpayMsg').textContent = '🔍 Шалгаж байна...';
+  setTimeout(() => {
+    document.getElementById('qpayMsg').className = 'auth-msg success';
+    document.getElementById('qpayMsg').textContent = '✅ QPay баталгаажлаа!';
+    setTimeout(() => { closeModal('modalQpay'); loginAsDemo('IET2021001'); }, 1500);
+  }, 1500);
+}
+
+/* ══════════════ REGISTER ══════════════ */
+function regTab(type, btn) {
+  document.querySelectorAll('#modalRegister .auth-tab').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('regEmail').style.display = type==='email' ? '' : 'none';
+  document.getElementById('regPhone').style.display = type==='phone' ? '' : 'none';
+  document.getElementById('regBank').style.display = type==='bank' ? '' : 'none';
+}
+
+let regOTPKey = 'register_email';
+let regPendingEmail = '';
+
+async function regEmailStep1() {
+  const lname  = document.getElementById('reLname').value.trim();
+  const fname  = document.getElementById('reFname').value.trim();
+  const studId = document.getElementById('reStudId').value.trim();
+  const email  = document.getElementById('reEmail').value.trim();
+  const pwd    = document.getElementById('rePwd').value;
+  const pwd2   = document.getElementById('rePwd2').value;
+  const dept   = document.getElementById('reDept').value;
+
+  if (!lname||!fname||!studId||!email||!pwd||!dept) { showMsg('reMsg1','error','⚠ Бүх талбарыг бөглөнө үү'); return; }
+  if (!email.includes('@')) { showMsg('reMsg1','error','⚠ Зөв имэйл хаяг оруулна уу'); return; }
+  if (pwd.length < 4) { showMsg('reMsg1','error','⚠ Нууц үг хамгийн багадаа 4 тэмдэгт байна'); return; }
+  if (pwd !== pwd2) { showMsg('reMsg1','error','⚠ Нууц үг тохирсонгүй'); return; }
+  if (ACCOUNTS[studId]) { showMsg('reMsg1','error','⚠ Тухайн ID аль хэдийн бүртгэлтэй байна'); return; }
+
+  const btn = document.querySelector('#reStep1 .btn-auth');
+  if (btn) { btn.disabled = true; btn.textContent = '📧 Илгээж байна...'; }
+  showMsg('reMsg1','info','⏳ Имэйл илгээж байна...');
+
+  try {
+    await waitFirebase();
+    if (!window._sendEmailOTP) throw new Error('Firebase холбогдоогүй байна');
+    await window._sendEmailOTP(email, 'register');
+    regPendingEmail = email;
+    showMsg('reMsg1','success','✓ ' + email + ' руу баталгаажуулах код илгээлээ!');
+    setTimeout(() => {
+      document.getElementById('reStep1').style.display = 'none';
+      document.getElementById('reStep2').style.display = '';
+      setStepActive('re1','re2','reline1');
+      document.getElementById('reOtpDesc').innerHTML =
+        '📬 <b style="color:var(--cyan)">' + email + '</b> руу код илгээлээ.<br>' +
+        'Имэйлээ шалгана уу. Хугацаа: <span class="otp-timer" id="reTimer">3:00</span>';
+      startTimer('reTimer', 180);
+      document.getElementById('re_o1').focus();
+    }, 800);
+  } catch (err) {
+    const isConfig = err.message && err.message.includes('YOUR_');
+    showMsg('reMsg1','error', isConfig
+      ? '⚙️ Firebase/EmailJS тохиргоо хийгдээгүй байна.'
+      : '✕ Майл илгээхэд алдаа: ' + err.message);
+    if (btn) { btn.disabled = false; btn.textContent = 'ДАРААХ →'; }
+  }
+}
+
+async function regEmailStep2() {
+  const code = getOTP('re_o');
+  if (code.length < 6) { showMsg('reMsg2','error','⚠ 6 оронтой кодыг бүтэн оруулна уу'); return; }
+
+  const btn = document.querySelector('#reStep2 .btn-auth');
+  if (btn) { btn.disabled = true; btn.textContent = '🔍 Шалгаж байна...'; }
+
+  try {
+    await waitFirebase();
+    const result = await window._verifyEmailOTP(regPendingEmail, 'register', code);
+    if (result.ok) {
+      const lname  = document.getElementById('reLname').value.trim();
+      const fname  = document.getElementById('reFname').value.trim();
+      const studId = document.getElementById('reStudId').value.trim();
+      const email  = document.getElementById('reEmail').value.trim();
+      const pwd    = document.getElementById('rePwd').value;
+      const dept   = document.getElementById('reDept').value;
+      ACCOUNTS[studId] = {
+        pw: pwd, name: lname + ' ' + fname, short: lname + ' ' + fname[0] + '.', init: lname[0],
+        color: 'linear-gradient(135deg,#00c8ff,#0066cc)',
+        dept, course: '1-р курс', year: '2024',
+        credits: 0, gpa: 0, att: '100%',
+        tags: [{t:'2024 он',c:'#00c8ff'},{t:'Бакалавр',c:'#9b5de5'},{t:'Шинэ',c:'#00e5a0'}],
+        phone: '+976 0000 0000', email,
+        semesters: [[]]
+      };
+      SCHEDULES[studId] = [];
+      document.getElementById('reStep2').style.display = 'none';
+      document.getElementById('reStep3').style.display = '';
+      setStepDone('re1'); setStepDone('re2'); setStepDone('re3');
+      setLineDone('reline1'); setLineDone('reline2');
+      document.getElementById('regConfirmBox').innerHTML = `
+        <div class="reg-confirm-row"><span>Оюутны ID</span><span>${studId}</span></div>
+        <div class="reg-confirm-row"><span>Нэр</span><span>${lname} ${fname}</span></div>
+        <div class="reg-confirm-row"><span>Имэйл</span><span>${email}</span></div>
+        <div class="reg-confirm-row"><span>Тэнхим</span><span>${dept}</span></div>
+      `;
+    } else {
+      showMsg('reMsg2','error', result.reason);
+      clearOTP('re_o');
+      if (btn) { btn.disabled = false; btn.textContent = '✓ БАТАЛГААЖУУЛАХ'; }
+    }
+  } catch (err) {
+    showMsg('reMsg2','error','✕ Шалгахад алдаа: ' + err.message);
+    if (btn) { btn.disabled = false; btn.textContent = '✓ БАТАЛГААЖУУЛАХ'; }
+  }
+}
+
+function reShowStep1() {
+  document.getElementById('reStep2').style.display='none';
+  document.getElementById('reStep1').style.display='';
+  resetStep('re2','reline1');
+  const btn = document.querySelector('#reStep1 .btn-auth');
+  if (btn) { btn.disabled = false; btn.textContent = 'ДАРААХ →'; }
+}
+
+async function regResendEmail() {
+  if (!regPendingEmail) { showMsg('reMsg2','error','⚠ Эхлээд имэйл оруулна уу'); return; }
+  try {
+    showMsg('reMsg2','info','⏳ Дахин илгээж байна...');
+    await waitFirebase();
+    await window._sendEmailOTP(regPendingEmail, 'register');
+    showMsg('reMsg2','success','✓ Дахин код илгээлээ!');
+    startTimer('reTimer', 180);
+  } catch(err) {
+    showMsg('reMsg2','error','✕ Дахин илгээхэд алдаа: ' + err.message);
+  }
+}
+
+
+
+let regPhoneKey = 'register_phone';
+let regPhoneSent = false;
+
+function regPhoneSend() {
+  const phone = document.getElementById('regPhoneNum').value.trim();
+  const lname = document.getElementById('rpLname').value.trim();
+  const fname = document.getElementById('rpFname').value.trim();
+  const studId = document.getElementById('rpStudId').value.trim();
+  if (phone.length < 8 || !lname || !fname || !studId) {
+    showMsg('rpMsg1','error','⚠ Бүх талбарыг бөглөнө үү'); return;
+  }
+  const code = _smsOTPSend(regPhoneKey);
+  showMsg('rpMsg1','success','✓ +976 ' + phone + ' руу SMS илгээлээ! (Demo: ' + code + ')');
+  document.getElementById('rpOtpBox').classList.add('visible');
+  document.getElementById('rpSendBtn').style.display = 'none';
+  document.getElementById('rpVerifyBtn').style.display = '';
+  startTimer('rpTimer', 180);
+  document.getElementById('rp_o1').focus();
+  regPhoneSent = true;
+}
+
+function regPhoneVerify() {
+  const code = getOTP('rp_o');
+  if (code.length < 6) { showMsg('rpMsg1','error','⚠ 6 оронтой кодыг бүтэн оруулна уу'); return; }
+  const _rpRes = _smsOTPVerify(regPhoneKey, code);
+  if (_rpRes.ok) {
+    const phone = document.getElementById('regPhoneNum').value.trim();
+    const lname = document.getElementById('rpLname').value.trim();
+    const fname = document.getElementById('rpFname').value.trim();
+    const studId = document.getElementById('rpStudId').value.trim();
+    ACCOUNTS[studId] = {
+      pw: phone, name: lname + ' ' + fname, short: lname + ' ' + fname[0] + '.', init: lname[0],
+      color: 'linear-gradient(135deg,#00c8ff,#0066cc)',
+      dept: 'Мэдээллийн технологи', course: '1-р курс', year: '2024',
+      credits: 0, gpa: 0, att: '100%',
+      tags: [{t:'2024 он',c:'#00c8ff'},{t:'Бакалавр',c:'#9b5de5'}],
+      phone: '+976 ' + phone, email: phone + '@student.iet.edu.mn',
+      semesters: [[]]
+    };
+    SCHEDULES[studId] = [];
+    showMsg('rpMsg1','success','🎉 Бүртгэл амжилттай! ID: ' + studId);
+    setTimeout(() => { closeModal('modalRegister'); loginAsDemo(studId); }, 2000);
+  } else {
+    showMsg('rpMsg1','error','✕ Код буруу байна.');
+    clearOTP('rp_o');
+  }
+}
+
+/* ══════════════ PAYMENT IN DASHBOARD ══════════════ */
+function dashboardPay(method) {
+  if (method === 'QPay') {
+    document.getElementById('qpayAmount').textContent = '₮450,000';
+    document.getElementById('qpayLabel').textContent = 'Сургалтын төлбөр — 2024 Намар';
+    openModal('modalQpay');
+    drawQRCode('qpayQrCanvas', 'https://qpay.mn/q/IET-PAY-450000-' + Date.now());
+  } else if (method === 'Хаан банк') {
+    openModal('modalKhan');
+  } else if (method === 'Төрийн банк') {
+    openModal('modalState');
+  } else {
+    alert('💡 ' + method + ' төлбөрийн систем удахгүй нэмэгдэнэ. Одоогоор QPay эсвэл банкуудаар төлнө үү.');
+  }
+}
+
+function payWith(method) { dashboardPay(method); }
+
+/* ══════════════ BANK NOT IMPLEMENTED ══════════════ */
+function bankNotImpl(name) {
+  const msg = document.createElement('div');
+  msg.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--card);border:1px solid var(--border);padding:12px 24px;border-radius:12px;color:var(--cyan);font-size:13px;z-index:99999;box-shadow:0 8px 32px rgba(0,0,0,.4);animation:slideUp .3s ease';
+  msg.innerHTML = '⚠ ' + name + ' интеграц удахгүй нэмэгдэнэ';
+  document.body.appendChild(msg);
+  setTimeout(() => msg.remove(), 3000);
+}
+
+/* ══════════════ LOGIN AS DEMO USER ══════════════ */
+function loginAsDemo(id) {
+  currentUser = id;
+  if (!ACCOUNTS[id]) { console.error('No account:', id); return; }
+  document.getElementById('loginPage').style.display = 'none';
+  document.getElementById('dashboard').style.display = 'block';
+  loadDashboard();
+  // Close all modals
+  document.querySelectorAll('.auth-overlay').forEach(m => m.classList.add('hidden'));
+  document.body.style.overflow = '';
+}
+
+/* ══════════════ STEP HELPERS ══════════════ */
+function showSection(id) { const el=document.getElementById(id); if(el) el.style.display=''; }
+function hideSection(id) { const el=document.getElementById(id); if(el) el.style.display='none'; }
+function showMsg(id, type, text) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.className = 'auth-msg ' + type;
+  el.textContent = text;
+  el.style.display = 'block';
+}
+function setStepActive(prevId, activeId, lineId) {
+  const prev = document.getElementById(prevId);
+  const active = document.getElementById(activeId);
+  if (prev) { prev.classList.remove('active'); prev.classList.add('done'); prev.textContent = '✓'; }
+  if (active) { active.classList.add('active'); }
+  if (lineId) { const l=document.getElementById(lineId); if(l) l.classList.add('done'); }
+}
+function setStepDone(id) {
+  const el = document.getElementById(id);
+  if (el) { el.classList.remove('active'); el.classList.add('done'); el.textContent = '✓'; }
+}
+function setLineDone(id) {
+  const el = document.getElementById(id);
+  if (el) el.classList.add('done');
+}
+function resetStep(stepId, lineId) {
+  const s=document.getElementById(stepId); if(s){s.classList.remove('active','done');s.textContent=stepId.slice(-1);}
+  const l=document.getElementById(lineId); if(l) l.classList.remove('done');
+}
+
+/* Enter key */
+document.addEventListener('DOMContentLoaded',()=>{
+  document.getElementById('inPw').addEventListener('keydown',e=>{ if(e.key==='Enter') doLogin(); });
+  document.getElementById('inId').addEventListener('keydown',e=>{ if(e.key==='Enter') document.getElementById('inPw').focus(); });
+
+  // Firebase тохиргоо шалгах — тохируулсан бол banner нуух
+  document.addEventListener('firebase-ready', () => {
+    const banner = document.getElementById('setupBanner');
+    if (banner) banner.style.display = 'none';
+  });
+  // 6 секундын дараа Firebase бэлэн болоогүй бол banner үлдэнэ
+});
+
+/* ══════════════════════════════════════════════
+   AI ТУСЛАХ — Claude API Backend
+══════════════════════════════════════════════ */
+
+let aiOpen = false;
+let aiChatHistory = [];
+
+function toggleAI() {
+  aiOpen = !aiOpen;
+  const panel = document.getElementById('aiPanel');
+  panel.classList.toggle('hidden', !aiOpen);
+  if (aiOpen) {
+    document.getElementById('aiInput').focus();
+    scrollAI();
+  }
+}
+
+function scrollAI() {
+  const msgs = document.getElementById('aiMessages');
+  setTimeout(() => msgs.scrollTop = msgs.scrollHeight, 50);
+}
+
+function addAIMsg(text, type) {
+  const msgs = document.getElementById('aiMessages');
+  const div = document.createElement('div');
+  div.className = 'ai-msg ' + type;
+  if (type === 'thinking') {
+    div.innerHTML = '<div class="ai-dots"><span></span><span></span><span></span></div>';
+  } else {
+    div.innerHTML = text;
+  }
+  msgs.appendChild(div);
+  scrollAI();
+  return div;
+}
+
+function getStudentContext() {
+  if (!currentUser || !ACCOUNTS[currentUser]) {
+    return 'Оюутан нэвтрээгүй байна. Ерөнхий зөвлөгөө л өгч болно.';
+  }
+  const acc = ACCOUNTS[currentUser];
+  const si = 0; // Хамгийн сүүлийн улирал
+  const grades = acc.semesters[si] || [];
+  const sched = SCHEDULES[currentUser] || [];
+
+  const gradeLines = grades.map(g =>
+    `${g.n}: ${g.sc}% (${g.g}, GPA ${g.gp.toFixed(1)}, ${g.cr} кредит)`
+  ).join('\n');
+
+  const schedLines = sched.map(d =>
+    `${d.d}: ${d.cls.map(c => `${c.t} ${c.n} (${c.r})`).join(', ')}`
+  ).join('\n');
+
+  const weakSubjects = grades.filter(g => g.sc < 80).map(g => g.n).join(', ') || 'байхгүй';
+  const topSubjects  = grades.filter(g => g.g === 'A').map(g => g.n).join(', ')  || 'байхгүй';
+  const semGPA = grades.length ? (grades.reduce((s,g)=>s+g.gp,0)/grades.length).toFixed(2) : 'N/A';
+
+  return `
+Оюутны мэдээлэл:
+- Нэр: ${acc.name}
+- ID: ${currentUser}
+- Тэнхим: ${acc.dept}
+- Курс: ${acc.course}
+- Нийт GPA: ${acc.gpa.toFixed(1)}
+- Нийт кредит: ${acc.credits}/120
+- Ирц: ${acc.att}
+
+2024-2025 Намрын улирлын дүн (GPA ${semGPA}):
+${gradeLines}
+
+Сул хичээлүүд (80%-аас доош): ${weakSubjects}
+A үнэлгээтэй хичээлүүд: ${topSubjects}
+
+Цагийн хуваарь:
+${schedLines}
+  `.trim();
+}
+
+async function aiSend() {
+  const input = document.getElementById('aiInput');
+  const text = input.value.trim();
+  if (!text) return;
+
+  input.value = '';
+  addAIMsg(text, 'user');
+
+  const btn = document.getElementById('aiSendBtn');
+  btn.disabled = true;
+
+  const thinkEl = addAIMsg('', 'thinking');
+
+  // Chat history-д нэмэх
+  aiChatHistory.push({ role: 'user', content: text });
+
+  try {
+    const studentCtx = getStudentContext();
+
+    const systemPrompt = `Та IET Политехник Коллежийн ухаалаг оюутны туслах AI байна.
+Монгол хэлээр богино, тодорхой, найрсгаар хариулна уу.
+Дүн дүгнэлт хийхдээ тоон өгөгдлийг үндэслэнэ үү.
+Зөвлөгөө өгөхдөө практик, биелүүлэхэд хялбар байдлаар бичнэ үү.
+Хариулт 3-5 өгүүлбэрт багтаана уу.
+
+${studentCtx}`;
+
+    const messages = [
+      ...aiChatHistory.slice(-8) // Сүүлийн 8 мессежийг л явуулна
+    ];
+
+    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 1000,
+        system: systemPrompt,
+        messages
+      })
+    });
+
+    const data = await resp.json();
+    const reply = data.content?.[0]?.text || 'Уучлаарай, хариулт алдаатай байна.';
+
+    thinkEl.remove();
+    addAIMsg(reply.replace(/\n/g, '<br>'), 'bot');
+    aiChatHistory.push({ role: 'assistant', content: reply });
+
+    // History-г 20 мессежээр хязгаарлана
+    if (aiChatHistory.length > 20) aiChatHistory = aiChatHistory.slice(-20);
+
+  } catch (err) {
+    thinkEl.remove();
+    addAIMsg('⚠️ Холболтын алдаа гарлаа. Дахин оролдоно уу.', 'bot');
+    aiChatHistory.pop(); // Failed message-г арилгана
+  }
+
+  btn.disabled = false;
+  document.getElementById('aiInput').focus();
+}
+
+function aiQuick(text) {
+  document.getElementById('aiInput').value = text;
+  aiSend();
+}
+</script>
+</body>
+</html>
